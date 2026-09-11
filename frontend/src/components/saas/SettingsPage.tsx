@@ -397,7 +397,7 @@ const SettingsPage: React.FC = () => {
             {apiKey && (
               <button 
                 style={{...styles.saveButton, background: 'rgba(239, 68, 68, 0.1)', color: '#ef4444'}}
-                onClick={() => { setApiKey(''); localStorage.removeItem('saas_api_key'); }}
+                onClick={async () => { setApiKey(''); localStorage.removeItem('saas_api_key'); try { await fetch('/api/config/api-key', { method: 'DELETE' }); } catch {} }}
               >
                 Remover
               </button>

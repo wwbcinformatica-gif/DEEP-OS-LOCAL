@@ -63,6 +63,16 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           secure: false,
         },
+        '/ollama': {
+          target: 'http://127.0.0.1:8001',
+          changeOrigin: true,
+          secure: false,
+        },
+        '/llamacpp': {
+          target: 'http://127.0.0.1:8001',
+          changeOrigin: true,
+          secure: false,
+        },
       },
     },
     build: {

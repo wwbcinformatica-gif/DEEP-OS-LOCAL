@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+﻿import React, { useState, useRef, useEffect } from 'react';
 import {
   Conversation, TranscriptEntry,
   getConversations, createConversation, renameConversation, deleteConversation,
@@ -45,6 +45,8 @@ const BROWSER_VOICE_MAP: Record<string, string[]> = {
 };
 
 const PROVIDERS = [
+  { id: 'ollama', label: 'Ollama (local)', keyField: '', models: [], dynamic: true },
+  { id: 'llamacpp', label: 'llama.cpp (GGUF local)', keyField: '', models: [], dynamic: true },
   { id: 'gemini', label: 'Google Gemini', keyField: 'gemini', models: [
     { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash (limitado)' },
     { id: 'gemini-1.5-flash', label: 'Gemini 1.5 Flash' },
@@ -52,7 +54,7 @@ const PROVIDERS = [
   ]},
   { id: 'openrouter', label: 'OpenRouter (gratis/variados)', keyField: 'openrouter', models: [
     { id: 'openrouter/auto', label: 'Auto (melhor modelo)' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (grátis)' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (grÃ¡tis)' },
     { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
     { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
     { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
@@ -78,7 +80,7 @@ const JarvisPage: React.FC = () => {
     {
       id: '1',
       role: 'jarvis',
-      content: 'Olá! Sou o Jarvis, seu assistente inteligente. Posso ouvir você, executar tarefas e usar ferramentas. Como posso ajudar?',
+      content: 'OlÃ¡! Sou o Jarvis, seu assistente inteligente. Posso ouvir vocÃª, executar tarefas e usar ferramentas. Como posso ajudar?',
       timestamp: new Date(),
     },
   ]);
@@ -97,7 +99,14 @@ const JarvisPage: React.FC = () => {
   const [instances, setInstances] = useState<any[]>([]);
   const [selectedInstanceId, setSelectedInstanceId] = useState(tenantGet('jarvis_instance_id') || '');
   const [instanceConfig, setInstanceConfig] = useState<any>(null);
+  const [dynamicModels, setDynamicModels] = useState<{id: string, label: string, hasVision?: boolean}[]>([]);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const textareaHeightRef = useRef(60);
+  const [textareaHeight, setTextareaHeight] = useState(60);
+  const rightPanelWidthRef = useRef(280);
+  const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const rightListRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
 
@@ -151,6 +160,41 @@ const JarvisPage: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
+    if (selectedProvider === 'ollama') {
+      setLoadingModels(true);
+      fetch('/ollama/models').then(r => r.ok ? r.json() : { models: [] }).then(data => {
+        const visionPatterns = /vl|vision|llava|gemma4/i;
+        const models = (data.models || []).map((m: string) => ({
+          id: m,
+          label: m,
+          hasVision: visionPatterns.test(m),
+        }));
+        setDynamicModels(models);
+        if (models.length > 0 && !models.find((m: any) => m.id === selectedModel)) {
+          setSelectedModel(models[0].id);
+        }
+        setLoadingModels(false);
+      }).catch(() => { setDynamicModels([]); setLoadingModels(false); });
+    } else if (selectedProvider === 'llamacpp') {
+      setLoadingModels(true);
+      fetch('/llamacpp/models').then(r => r.ok ? r.json() : { models: [] }).then(data => {
+        const models = (data.models || []).map((m: any) => ({
+          id: m.id || m.file,
+          label: m.label || m.id || m.file,
+          hasVision: m.has_vision || false,
+        }));
+        setDynamicModels(models);
+        if (models.length > 0 && !models.find((m: any) => m.id === selectedModel)) {
+          setSelectedModel(models[0].id);
+        }
+        setLoadingModels(false);
+      }).catch(() => { setDynamicModels([]); setLoadingModels(false); });
+    } else {
+      setDynamicModels([]);
+    }
+  }, [selectedProvider]);
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       synthRef.current = window.speechSynthesis;
     }
@@ -158,7 +202,7 @@ const JarvisPage: React.FC = () => {
 
   const startListening = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Seu navegador não suporta reconhecimento de voz. Use Chrome.');
+      alert('Seu navegador nÃ£o suporta reconhecimento de voz. Use Chrome.');
       return;
     }
 
@@ -369,7 +413,7 @@ const JarvisPage: React.FC = () => {
                   return updated;
                 });
               } else if (event.type === 'error') {
-                fullAnswer += `\n\n❌ Erro: ${event.message}`;
+                fullAnswer += `\n\nâŒ Erro: ${event.message}`;
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
@@ -404,7 +448,7 @@ const JarvisPage: React.FC = () => {
         if (idx >= 0) {
           updated[idx] = {
             ...updated[idx],
-            content: `Desculpe, ocorreu um erro: ${err.message}. Verifique se o backend está rodando e se sua chave de API está configurada.`,
+            content: `Desculpe, ocorreu um erro: ${err.message}. Verifique se o backend estÃ¡ rodando e se sua chave de API estÃ¡ configurada.`,
             isStreaming: false,
           };
         }
@@ -425,14 +469,14 @@ const JarvisPage: React.FC = () => {
       handleSendMessage();
     }
     // Auto-resize textarea
-    const target = e.target;
+    const target = e.target as HTMLTextAreaElement;
     setTimeout(() => {
       target.style.height = 'auto';
       target.style.height = Math.min(target.scrollHeight, 150) + 'px';
     }, 0);
   };
 
-  // ─── Conversation management ───────────────────────────────────
+  // â”€â”€â”€ Conversation management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const switchConversation = (convId: string) => {
     setActiveConvId(convId);
     setShowConvMenu(false);
@@ -446,7 +490,7 @@ const JarvisPage: React.FC = () => {
     setMessages([{
       id: '1',
       role: 'jarvis',
-      content: 'Olá! Sou o Jarvis, seu assistente inteligente. Como posso ajudar?',
+      content: 'OlÃ¡! Sou o Jarvis, seu assistente inteligente. Como posso ajudar?',
       timestamp: new Date(),
     }]);
     setShowConvMenu(false);
@@ -499,366 +543,200 @@ const JarvisPage: React.FC = () => {
   const activeConv = conversations.find(c => c.id === activeConvId);
 
   return (
-    <div style={styles.container} className="jarvis-container">
-      {/* Header */}
-      <div style={styles.header}>
-        <div style={styles.headerLeft}>
-          <div style={styles.jarvisIcon}>🤖</div>
-          <div>
-            <h1 style={styles.title}>Jarvis</h1>
-            <p style={styles.subtitle}>Assistente Inteligente com Voz e Ferramentas</p>
+    <div style={s.container}>
+      <div style={s.chatLayout}>
+        {/* LEFT PANEL â€” Chat */}
+        <div style={s.leftPanel}>
+          <div style={s.convBar}>
+            <button onClick={newConversation} title="Nova conversa" style={s.convNewBtn}>+</button>
+            <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nova conversa'}</button>
+            <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
+            {showConvMenu && (
+              <div style={s.convDropdown}>
+                {conversations.map(conv => (
+                  <div key={conv.id} onClick={() => switchConversation(conv.id)} style={{ ...s.convItem, background: conv.id === activeConvId ? 'rgba(0,217,255,0.15)' : 'transparent' }}>
+                    <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#00d9ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{conv.name}</span>
+                    <span style={{ fontSize: 9, color: '#666' }}>{formatConvTime(conv.updatedAt)}</span>
+                    <button onClick={(e) => handleRenameConversation(conv.id, e)} style={s.convActionBtn}>âœŽ</button>
+                    <button onClick={(e) => handleDeleteConversation(conv.id, e)} style={{ ...s.convActionBtn, color: '#f44' }}>âœ•</button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-        {/* Conversation selector */}
-        <div style={{ position: 'relative' as const, display: 'flex', alignItems: 'center', gap: 4 }}>
-          <button onClick={newConversation} title="Nova conversa" style={{ background: 'none', border: '1px solid #333', color: '#00d9ff', fontSize: 13, cursor: 'pointer', padding: '4px 8px', borderRadius: 4 }}>+</button>
-          <button
-            onClick={() => setShowConvMenu(!showConvMenu)}
-            style={{
-              background: 'rgba(255,255,255,0.05)', border: '1px solid #333', borderRadius: 4,
-              color: '#ccc', fontSize: 11, textAlign: 'left', cursor: 'pointer',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
-              padding: '4px 8px', maxWidth: 180,
-            }}
-          >
-            {activeConv?.name || 'Nova conversa'}
-          </button>
-          {showConvMenu && (
-            <div style={{
-              position: 'absolute', top: '100%', right: 0, zIndex: 100,
-              background: '#1a1a2e', border: '1px solid #333', borderRadius: 6,
-              maxHeight: 200, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-              minWidth: 200,
-            }}>
-              {conversations.map(conv => (
-                <div
-                  key={conv.id}
-                  onClick={() => switchConversation(conv.id)}
-                  style={{
-                    padding: '6px 8px', cursor: 'pointer', display: 'flex',
-                    alignItems: 'center', gap: 6,
-                    background: conv.id === activeConvId ? 'rgba(0,217,255,0.15)' : 'transparent',
-                    borderBottom: '1px solid #222',
-                  }}
-                >
-                  <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#00d9ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                    {conv.name}
-                  </span>
-                  <span style={{ fontSize: 9, color: '#666', flexShrink: 0 }}>{formatConvTime(conv.updatedAt)}</span>
-                  <button onClick={(e) => handleRenameConversation(conv.id, e)} title="Renomear" style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 10, padding: '0 2px' }}>✎</button>
-                  <button onClick={(e) => handleDeleteConversation(conv.id, e)} title="Excluir" style={{ background: 'none', border: 'none', color: '#f44', cursor: 'pointer', fontSize: 10, padding: '0 2px' }}>✕</button>
-                </div>
-              ))}
-              {conversations.length === 0 && (
-                <div style={{ padding: '8px', textAlign: 'center', color: '#666', fontSize: 11 }}>
-                  Nenhuma conversa ainda
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-        <div style={{ ...styles.headerRight, flexDirection: 'column', gap: 6, alignItems: 'flex-end' }}>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <select
-              value={selectedProvider}
-              onChange={(e) => {
-                setSelectedProvider(e.target.value);
-                const prov = PROVIDERS.find(p => p.id === e.target.value);
-                if (prov) setSelectedModel(prov.models[0].id);
-              }}
-              style={styles.modelSelect}
-            >
-              {PROVIDERS.map(p => (
-                <option key={p.id} value={p.id}>{p.label}</option>
-              ))}
-            </select>
-            <select
-              value={selectedModel}
-              onChange={(e) => setSelectedModel(e.target.value)}
-              style={styles.modelSelect}
-            >
-              {(PROVIDERS.find(p => p.id === selectedProvider)?.models || []).map(m => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-            </select>
-            <button style={styles.settingsBtn} onClick={() => setShowSettings(!showSettings)} title="Configurações">
-              ⚙️
-            </button>
-          </div>
-        </div>
-      </div>
 
-      {/* Settings Panel */}
-      {showSettings && (
-        <div style={{
-          background: 'var(--saas-bg-card)',
-          border: '1px solid var(--saas-border)',
-          borderRadius: 8,
-          padding: 16,
-          marginBottom: 12,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}>
-          {PROVIDERS.map(prov => (
-            <div key={prov.id}>
-              <label style={{ fontSize: 12, color: 'var(--saas-text-muted)', display: 'block', marginBottom: 4 }}>
-                🔑 {prov.label} API Key
-              </label>
-              <input
-                type="password"
-                value={prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '')}
-                onChange={(e) => {
-                  if (prov.keyField === 'gemini') {
-                    setApiKey(e.target.value);
-                  } else {
-                    setApiKeys({ ...apiKeys, [prov.keyField]: e.target.value });
-                  }
-                }}
-                placeholder={prov.id === 'gemini' ? 'AIza...' : prov.id === 'openrouter' ? 'sk-or-v1-...' : 'sk-...'}
-                style={styles.apiInput}
-              />
-              <button onClick={() => {
-                const key = prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '');
-                if (prov.keyField === 'gemini') {
-                  tenantSet('saas_api_key', key);
-                  setApiKey(key);
-                  fetch('/api/config/api-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: key }) }).catch(() => {});
-                } else {
-                  tenantSet(`${prov.keyField}_api_key`, key);
-                  setApiKeys({ ...apiKeys, [prov.keyField]: key });
-                }
-                alert(`Chave ${prov.label} salva!`);
-              }} style={styles.saveKeyBtn}>Salvar {prov.label}</button>
+          {/* Model/Provider header */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderBottom: '1px solid #222', flexShrink: 0, gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <span style={{ color: '#00d9ff', fontSize: 12 }}>ðŸ¤–</span>
+              <span style={{ fontSize: 12, color: '#00d9ff', fontWeight: 600 }}>Jarvis</span>
             </div>
-          ))}
-
-          {/* Instancia */}
-          {instances.length > 0 && (
-            <div>
-              <label style={{ fontSize: 12, color: 'var(--saas-text-muted)', display: 'block', marginBottom: 4 }}>Instância</label>
-              <select
-                value={selectedInstanceId}
-                onChange={(e) => {
-                  const id = e.target.value;
-                  setSelectedInstanceId(id);
-                  tenantSet('jarvis_instance_id', id);
-                  if (id) {
-                    const inst = instances.find(i => i.id === id);
-                    if (inst) {
-                      setSelectedModel(inst.model);
-                      setSelectedProvider(inst.provider);
-                      setInstanceConfig(inst);
-                    }
-                  } else {
-                    setInstanceConfig(null);
-                  }
-                }}
-                style={styles.apiInput}
-              >
-                <option value="">— Padrão —</option>
-                {instances.map(inst => (
-                  <option key={inst.id} value={inst.id}>{inst.name} ({inst.model})</option>
+            <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <select value={selectedProvider} onChange={(e) => { setSelectedProvider(e.target.value); const prov = PROVIDERS.find(p => p.id === e.target.value); if (prov && prov.models.length > 0) setSelectedModel(prov.models[0].id); }} style={s.modelSelect}>
+                {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              </select>
+              <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} style={s.modelSelectWide}>
+                {((dynamicModels.length > 0 ? dynamicModels : (PROVIDERS.find(p => p.id === selectedProvider)?.models || []))).map(m => (
+                  <option key={m.id} value={m.id}>{(m as any).hasVision ? 'ðŸ‘ ' : ''}{m.label}</option>
                 ))}
               </select>
+              <button style={s.settingsBtn} onClick={() => setShowSettings(!showSettings)}>âš™ï¸</button>
+            </div>
+          </div>
+
+          {/* Settings Panel */}
+          {showSettings && (
+            <div style={s.settingsPanel}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff', marginBottom: 4 }}>Configuracoes</div>
+              {PROVIDERS.filter(p => !p.dynamic).map(prov => (
+                <div key={prov.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
+                  <label style={{ fontSize: 10, color: '#999', minWidth: 80 }}>{prov.label}:</label>
+                  <input type="password" value={prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '')}
+                    onChange={(e) => { if (prov.keyField === 'gemini') setApiKey(e.target.value); else setApiKeys({ ...apiKeys, [prov.keyField]: e.target.value }); }}
+                    style={s.configInput} placeholder="sk-..." />
+                  <button onClick={() => {
+                    const key = prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '');
+                    if (prov.keyField === 'gemini') { tenantSet('saas_api_key', key); setApiKey(key); fetch('/api/config/api-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: key }) }).catch(() => {}); }
+                    else { tenantSet(`${prov.keyField}_api_key`, key); setApiKeys({ ...apiKeys, [prov.keyField]: key }); }
+                    const envKeyMap: Record<string, string> = { gemini: 'GEMINI_API_KEY', openrouter: 'OPENROUTER_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', nvidia: 'NVIDIA_API_KEY', mimo: 'MIMO_API_KEY', openclaude: 'OPENCLAUDE_API_KEY', opencode: 'OPENCODE_API_KEY' };
+                    const envPayload: Record<string, string> = {};
+                    Object.keys(envKeyMap).forEach(pk => { envPayload[envKeyMap[pk]] = pk === 'gemini' ? (pk === prov.keyField ? key : (apiKeys['gemini'] || tenantGet('saas_api_key') || '')) : pk === prov.keyField ? key : (apiKeys[pk] || tenantGet(`${pk}_api_key`) || ''); });
+                    fetch('/api/config/api-keys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envPayload) }).catch(() => {});
+                    alert(`Chave ${prov.label} salva!`);
+                  }} style={s.saveBtn}>Salvar</button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, borderTop: '1px solid #222', paddingTop: 4 }}>
+                <label style={{ fontSize: 10, color: '#999', minWidth: 80 }}>Voz:</label>
+                <select value={selectedVoice} onChange={(e) => { setSelectedVoice(e.target.value); tenantSet('jarvis_voice', e.target.value); }} style={s.modelSelectWide}>
+                  {VOICE_OPTIONS.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
+                </select>
+              </div>
             </div>
           )}
 
-          {/* Voz */}
-          <div>
-            <label style={{ fontSize: 12, color: 'var(--saas-text-muted)', display: 'block', marginBottom: 4 }}>🎙️ Voz</label>
-            <select
-              value={selectedVoice}
-              onChange={(e) => {
-                setSelectedVoice(e.target.value);
-                tenantSet('jarvis_voice', e.target.value);
-              }}
-              style={styles.apiInput}
-            >
-              {VOICE_OPTIONS.map(v => (
-                <option key={v.key} value={v.key}>{v.label} — {v.desc}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Velocidade */}
-          <div>
-            <label style={{ fontSize: 12, color: 'var(--saas-text-muted)', display: 'block', marginBottom: 4 }}>
-              🔊 Velocidade da voz: {voiceRate.toFixed(1)}x
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: '#666' }}>Lento</span>
-              <input
-                type="range"
-                min="0.5"
-                max="3"
-                step="0.1"
-                value={voiceRate}
-                onChange={(e) => {
-                  const rate = parseFloat(e.target.value);
-                  setVoiceRate(rate);
-                  tenantSet('jarvis_voice_rate', String(rate));
-                }}
-                style={{ flex: 1 }}
-              />
-              <span style={{ fontSize: 11, color: '#666' }}>Rápido</span>
-            </div>
-          </div>
-
-          {/* Tom */}
-          <div>
-            <label style={{ fontSize: 12, color: 'var(--saas-text-muted)', display: 'block', marginBottom: 4 }}>
-              🎵 Tom da voz: {voicePitch}%
-            </label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: '#666' }}>Grave</span>
-              <input
-                type="range"
-                min="0"
-                max="100"
-                step="5"
-                value={voicePitch}
-                onChange={(e) => {
-                  const pitch = parseInt(e.target.value);
-                  setVoicePitch(pitch);
-                  tenantSet('jarvis_voice_pitch', String(pitch));
-                }}
-                style={{ flex: 1 }}
-              />
-              <span style={{ fontSize: 11, color: '#666' }}>Agudo</span>
-            </div>
-          </div>
-
-          <div style={{ fontSize: 11, color: 'var(--saas-text-muted)' }}>
-            Provedor: {selectedProvider} | Modelo: {selectedModel}
-          </div>
-        </div>
-      )}
-
-      {/* Chat Area */}
-      <div style={styles.chatContainer}>
-        <div style={styles.messagesArea}>
-          {messages.map(msg => (
-            <div
-              key={msg.id}
-              style={{
-                ...styles.message,
-                ...(msg.role === 'jarvis' ? styles.messageJarvis : styles.messageUser),
-              }}
-            >
-              {msg.role === 'jarvis' && (
-                <div style={styles.avatarJarvis}>J</div>
-              )}
-              <div style={styles.messageContent}>
-                <p style={styles.messageText}>
-                  {msg.content}
-                  {msg.isStreaming && <span style={styles.cursor}>▌</span>}
-                </p>
-
-                {/* Tool Calls */}
+          {/* Messages */}
+          <div style={s.messagesArea}>
+            {messages.length === 0 ? (
+              <div style={s.emptyState}>Jarvis pronto. Como posso ajudar?</div>
+            ) : messages.map(msg => (
+              <div key={msg.id} style={{
+                marginBottom: 10, padding: '8px 10px', borderRadius: 6,
+                background: msg.role === 'user' ? 'rgba(0,217,255,0.08)' : 'rgba(180,120,255,0.08)',
+                borderLeft: `3px solid ${msg.role === 'user' ? '#00d9ff' : '#b478ff'}`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                  <span style={{ fontSize: 12 }}>{msg.role === 'user' ? 'ðŸ‘¤' : 'ðŸ¤–'}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: msg.role === 'user' ? '#00d9ff' : '#b478ff' }}>
+                    {msg.role === 'user' ? 'Voce' : 'Jarvis'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>
+                    {msg.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div style={{ color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
+                  {msg.content}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>â–Œ</span>}
+                </div>
                 {msg.tools && msg.tools.length > 0 && (
-                  <div style={styles.toolsContainer}>
+                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {msg.tools.map((tool, i) => (
-                      <div key={i} style={{
-                        ...styles.toolCard,
-                        borderColor: tool.status === 'running' ? '#f59e0b' :
-                                   tool.status === 'done' ? '#10b981' : '#ef4444',
-                      }}>
-                        <div style={styles.toolHeader}>
-                          <span style={styles.toolIcon}>🔧</span>
-                          <span style={styles.toolName}>{tool.name}</span>
-                          <span style={{
-                            ...styles.toolStatus,
-                            color: tool.status === 'running' ? '#f59e0b' :
-                                  tool.status === 'done' ? '#10b981' : '#ef4444',
-                          }}>
-                            {tool.status === 'running' ? '⏳ Executando...' :
-                             tool.status === 'done' ? '✅ Concluído' : '❌ Erro'}
-                          </span>
-                        </div>
-                        {tool.result && (
-                          <pre style={styles.toolResult}>{tool.result}</pre>
-                        )}
+                      <div key={i} style={{ padding: '6px 8px', background: '#111', borderRadius: 4, borderLeft: `2px solid ${tool.status === 'running' ? '#f59e0b' : tool.status === 'done' ? '#10b981' : '#ef4444'}`, fontSize: 11 }}>
+                        <span style={{ color: '#999' }}>ðŸ”§</span> <span style={{ color: '#ccc', fontWeight: 600 }}>{tool.name}</span>
+                        <span style={{ marginLeft: 8, color: tool.status === 'running' ? '#f59e0b' : tool.status === 'done' ? '#10b981' : '#ef4444', fontSize: 10 }}>
+                          {tool.status === 'running' ? 'â³ Executando...' : tool.status === 'done' ? 'âœ… ConcluÃ­do' : 'âŒ Erro'}
+                        </span>
+                        {tool.result && <pre style={{ marginTop: 4, padding: 4, background: '#1a1a2e', borderRadius: 3, fontSize: 10, fontFamily: 'monospace', color: '#999', overflow: 'auto', maxHeight: 80, whiteSpace: 'pre-wrap' }}>{tool.result}</pre>}
                       </div>
                     ))}
                   </div>
                 )}
-
-                <span style={styles.messageTime}>
-                  {msg.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                </span>
               </div>
-              {msg.role === 'user' && (
-                <div style={styles.avatarUser}>W</div>
-              )}
-            </div>
-          ))}
-
-          {isTyping && (
-            <div style={{...styles.message, ...styles.messageJarvis}}>
-              <div style={styles.avatarJarvis}>J</div>
-              <div style={styles.messageContent}>
-                <div style={styles.typingIndicator}>
-                  <span style={styles.typingDot}></span>
-                  <span style={styles.typingDot}></span>
-                  <span style={styles.typingDot}></span>
+            ))}
+            {isTyping && (
+              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,217,255,0.08)', borderLeft: '3px solid #00d9ff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
+                  <span style={{ fontSize: 12 }}>ðŸ¤–</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>Jarvis</span>
+                </div>
+                <div style={{ display: 'flex', gap: 4, padding: '4px 0' }}>
+                  <span style={{ width: 6, height: 6, background: '#666', borderRadius: '50%', animation: 'pulse 1.4s infinite' }} />
+                  <span style={{ width: 6, height: 6, background: '#666', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.2s' }} />
+                  <span style={{ width: 6, height: 6, background: '#666', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.4s' }} />
                 </div>
               </div>
-            </div>
-          )}
+            )}
+            <div ref={messagesEndRef} />
+          </div>
 
-          <div ref={messagesEndRef} />
+          {/* Input */}
+          <div style={s.inputSection}>
+            <div onPointerDown={(e) => { e.preventDefault(); const startY = e.clientY; const startH = textareaHeightRef.current; const move = (ev: PointerEvent) => { const delta = startY - ev.clientY; textareaHeightRef.current = Math.max(36, Math.min(300, startH + delta)); setTextareaHeight(textareaHeightRef.current); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ height: 6, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, margin: '2px 0' }}>
+              <div style={{ width: 40, height: 3, borderRadius: 2, background: '#444' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+                placeholder={isListening ? 'Ouvindo...' : 'Digite sua mensagem...'}
+                style={{ ...s.textarea, height: textareaHeight, borderColor: isListening ? '#ef4444' : '#333' }}
+                disabled={isTyping} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
+                    {isListening ? 'â¹' : 'ðŸŽ¤'}
+                  </button>
+                  <button onClick={stopSpeaking} disabled={!isSpeaking} style={{ ...s.iconBtn, background: isSpeaking ? '#ef4444' : '#1a1a2e', color: isSpeaking ? '#fff' : '#666', opacity: isSpeaking ? 1 : 0.4 }} title={isSpeaking ? 'Parar voz' : 'Falante'}>
+                    {isSpeaking ? 'ðŸ”‡' : 'ðŸ”ˆ'}
+                  </button>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
+                  <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
+                    {isTyping ? 'Processando...' : 'Jarvis ativo'}
+                  </span>
+                </div>
+                <button style={s.sendBtn} onClick={handleSendMessage} disabled={!input.trim() || isTyping}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
-        {/* Input Area */}
-        <div style={styles.inputArea}>
-          <button
-            style={{
-              ...styles.voiceBtn,
-              background: isListening ? '#ef4444' : 'var(--saas-bg-card)',
-              color: isListening ? '#fff' : 'var(--saas-text)',
-            }}
-            onClick={isListening ? stopListening : startListening}
-            title={isListening ? 'Parar de ouvir' : 'Ouvir voz'}
-          >
-            {isListening ? '⏹' : '🎤'}
-          </button>
+        {/* DRAG HANDLE */}
+        <div onPointerDown={(e) => { e.preventDefault(); const startX = e.clientX; const startW = rightPanelWidthRef.current; const move = (ev: PointerEvent) => { const delta = startX - ev.clientX; rightPanelWidthRef.current = Math.max(200, Math.min(500, startW + delta)); setRightPanelWidth(rightPanelWidthRef.current); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ width: 5, cursor: 'ew-resize', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: '#111' }}>
+          <div style={{ width: 3, height: 40, borderRadius: 2, background: '#333' }} />
+        </div>
 
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={isListening ? 'Ouvindo...' : 'Digite sua mensagem...'}
-            rows={1}
-            style={{
-              ...styles.textarea,
-              borderColor: isListening ? '#ef4444' : 'var(--saas-border)',
-            }}
-            disabled={isTyping}
-          />
-
-          <button
-            style={styles.sendBtn}
-            onClick={handleSendMessage}
-            disabled={!input.trim() || isTyping}
-          >
-            {isTyping ? '⏳' : 'Enviar'}
-          </button>
-
-          <button
-            onClick={stopSpeaking}
-            disabled={!isSpeaking}
-            style={{
-              ...styles.voiceBtn,
-              background: isSpeaking ? '#ef4444' : 'var(--saas-bg-card)',
-              color: isSpeaking ? '#fff' : '#666',
-              opacity: isSpeaking ? 1 : 0.4,
-              cursor: isSpeaking ? 'pointer' : 'default',
-            }}
-            title={isSpeaking ? 'Parar voz' : 'Jarvis não está falando'}
-          >
-            {isSpeaking ? '🔇' : '🔈'}
-          </button>
+        {/* RIGHT PANEL â€” Context/Transcripts */}
+        <div style={{ ...s.rightPanel, width: rightPanelWidth }}>
+          <div style={s.rightHeader}>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>ðŸ¤– Jarvis</span>
+            <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>{messages.length} msgs</span>
+          </div>
+          <div ref={rightListRef} style={s.messagesList}>
+            {transcripts.length === 0 ? (
+              <div style={s.emptyState}>Conversas do Jarvis aparecerao aqui.</div>
+            ) : transcripts.map((t, i) => (
+              <div key={i} style={{
+                marginBottom: 8, padding: '6px 8px', borderRadius: 4,
+                background: t.speaker === 'user' ? 'rgba(0,217,255,0.06)' : 'rgba(180,120,255,0.06)',
+                borderLeft: `2px solid ${t.speaker === 'user' ? '#00d9ff' : '#b478ff'}`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: t.speaker === 'user' ? '#00d9ff' : '#b478ff' }}>
+                    {t.speaker === 'user' ? 'Voce' : 'Jarvis'}
+                  </span>
+                  <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>{t.time}</span>
+                </div>
+                <div style={{ color: '#999', fontSize: 10, lineHeight: 1.4, fontFamily: "'Cascadia Code', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{t.text}</div>
+              </div>
+            ))}
+          </div>
+          <div style={s.rightFooter}>
+            <span style={{ width: 5, height: 5, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0' }} />
+            <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0' }}>{isTyping ? 'Processando' : 'Pronto'}</span>
+            <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>{selectedProvider}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -888,186 +766,32 @@ const OllamaStatus: React.FC = () => {
   );
 };
 
-const styles: Record<string, React.CSSProperties> = {
-  container: {
-    display: 'flex',
-    flexDirection: 'column',
-    height: '100vh',
-    padding: '16px 24px 0 24px',
-    color: 'var(--saas-text)',
-    overflowY: 'auto',
-    overflowX: 'hidden',
-    WebkitOverflowScrolling: 'touch',
-  },
-  header: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '16px',
-    flexShrink: 0,
-  },
-  headerLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '16px',
-  },
-  jarvisIcon: {
-    width: '40px',
-    height: '40px',
-    background: 'linear-gradient(135deg, var(--saas-accent), #00ff88)',
-    borderRadius: '10px',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '20px',
-  },
-  title: { fontSize: '20px', fontWeight: 'bold', margin: 0 },
-  subtitle: { fontSize: '12px', color: 'var(--saas-text-muted)', margin: 0 },
-  headerRight: { display: 'flex', gap: '8px', alignItems: 'center' },
-  modelSelect: {
-    padding: '5px 8px',
-    background: 'transparent',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 6,
-    color: 'var(--saas-text-muted)',
-    fontSize: 11,
-    cursor: 'pointer',
-  },
-  settingsBtn: {
-    padding: '5px 8px',
-    background: 'transparent',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 6,
-    cursor: 'pointer',
-    fontSize: '13px',
-    color: 'var(--saas-text-muted)',
-  },
-  apiInput: {
-    width: '100%',
-    padding: '8px 12px',
-    background: 'var(--saas-bg-input)',
-    border: '1px solid var(--saas-border)',
-    borderRadius: 6,
-    color: 'var(--saas-text)',
-    fontSize: 13,
-    boxSizing: 'border-box',
-  },
-  saveKeyBtn: {
-    marginTop: 4,
-    padding: '4px 10px',
-    background: 'transparent',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 4,
-    color: 'var(--saas-text-muted)',
-    fontSize: 10,
-    cursor: 'pointer',
-  },
-  chatContainer: {
-    flex: 1,
-    display: 'flex',
-    flexDirection: 'column',
-    background: 'var(--saas-bg-card)',
-    border: '1px solid var(--saas-border)',
-    borderRadius: '12px',
-    marginBottom: '8px',
-  },
-  messagesArea: {
-    flex: 1,
-    padding: '20px',
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '16px',
-  },
-  message: { display: 'flex', gap: '12px', maxWidth: '85%' },
-  messageJarvis: { alignSelf: 'flex-start' },
-  messageUser: { alignSelf: 'flex-end', flexDirection: 'row-reverse' },
-  avatarJarvis: {
-    width: '36px', height: '36px',
-    background: 'linear-gradient(135deg, var(--saas-accent), #00ff88)',
-    borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '14px', fontWeight: 'bold', color: '#000', flexShrink: 0,
-  },
-  avatarUser: {
-    width: '36px', height: '36px',
-    background: 'linear-gradient(135deg, #8b5cf6, #a78bfa)',
-    borderRadius: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center',
-    fontSize: '14px', fontWeight: 'bold', color: '#fff', flexShrink: 0,
-  },
-  messageContent: {
-    background: 'var(--saas-bg-input)',
-    border: '1px solid var(--saas-border)',
-    borderRadius: '12px',
-    padding: '12px 16px',
-  },
-  messageText: { margin: 0, fontSize: '14px', lineHeight: 1.6, whiteSpace: 'pre-wrap' },
-  cursor: { animation: 'blink 1s infinite', color: 'var(--saas-accent)' },
-  toolsContainer: { marginTop: '12px', display: 'flex', flexDirection: 'column', gap: '8px' },
-  toolCard: {
-    padding: '10px 12px',
-    background: 'var(--saas-bg-card)',
-    border: '1px solid',
-    borderRadius: '8px',
-  },
-  toolHeader: { display: 'flex', alignItems: 'center', gap: '8px' },
-  toolIcon: { fontSize: '14px' },
-  toolName: { fontSize: '13px', fontWeight: '600', color: 'var(--saas-text)' },
-  toolStatus: { fontSize: '12px', marginLeft: 'auto' },
-  toolResult: {
-    marginTop: '8px',
-    padding: '8px',
-    background: 'var(--saas-bg-input)',
-    borderRadius: '6px',
-    fontSize: '11px',
-    fontFamily: 'monospace',
-    color: 'var(--saas-text-muted)',
-    overflow: 'auto',
-    maxHeight: '150px',
-    whiteSpace: 'pre-wrap',
-  },
-  messageTime: { fontSize: '11px', color: 'var(--saas-text-muted)', marginTop: '4px', display: 'block' },
-  typingIndicator: { display: 'flex', gap: '4px', padding: '4px 0' },
-  typingDot: {
-    width: '8px', height: '8px', background: 'var(--saas-text-muted)',
-    borderRadius: '50%', animation: 'pulse 1.4s infinite',
-  },
-  inputArea: {
-    display: 'flex', gap: '6px', padding: '8px 0 16px 0',
-    background: 'transparent',
-  },
-  voiceBtn: {
-    padding: '8px', border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 6, cursor: 'pointer', fontSize: '14px',
-    transition: 'all 0.2s', flexShrink: 0,
-    background: 'transparent',
-  },
-  sendBtn: {
-    padding: '8px 14px', background: 'transparent',
-    border: '1px solid rgba(255,255,255,0.08)', borderRadius: 6,
-    color: 'var(--saas-text-muted)',
-    fontSize: '12px', cursor: 'pointer', flexShrink: 0,
-  },
-  stopSpeakBtn: {
-    padding: '12px', background: 'rgba(239, 68, 68, 0.1)',
-    border: '1px solid rgba(239, 68, 68, 0.3)',
-    borderRadius: '8px', color: '#ef4444', fontSize: '12px', cursor: 'pointer',
-  },
-  textarea: {
-    flex: 1,
-    padding: '12px 16px',
-    background: 'var(--saas-bg-input)',
-    border: '1px solid var(--saas-border)',
-    borderRadius: '8px',
-    color: 'var(--saas-text)',
-    fontSize: '14px',
-    resize: 'vertical' as const,
-    minHeight: '44px',
-    maxHeight: '150px',
-    lineHeight: 1.5,
-    fontFamily: 'inherit',
-    outline: 'none',
-    overflow: 'auto',
-  },
+const s: Record<string, React.CSSProperties> = {
+  container: { display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0, color: '#fff', background: '#0a0a1a' },
+  chatLayout: { display: 'flex', flex: 1, minHeight: 0 },
+  leftPanel: { flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 },
+  convBar: { padding: '4px 8px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, position: 'relative' as const },
+  convNewBtn: { background: 'none', border: 'none', color: '#00d9ff', fontSize: 14, cursor: 'pointer', padding: '2px 4px', lineHeight: 1 },
+  convMenuBtn: { flex: 1, background: 'none', border: 'none', color: '#ccc', fontSize: 11, textAlign: 'left', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, padding: '2px 4px' },
+  convDropdown: { position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100, background: '#1a1a2e', border: '1px solid #333', borderRadius: 6, maxHeight: 200, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.5)' },
+  convItem: { padding: '6px 8px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, borderBottom: '1px solid #222' },
+  convActionBtn: { background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 10, padding: '0 2px' },
+  modelSelect: { fontSize: 11, padding: '4px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 3, color: '#ccc' },
+  modelSelectWide: { fontSize: 11, padding: '4px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 3, color: '#ccc', minWidth: 140 },
+  settingsBtn: { background: 'none', border: '1px solid #333', color: '#ccc', fontSize: 12, cursor: 'pointer', padding: '2px 6px', borderRadius: 3 },
+  settingsPanel: { padding: '8px 12px', borderBottom: '1px solid #222', background: '#111', flexShrink: 0 },
+  configInput: { width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 4, color: '#ccc', fontSize: 11, boxSizing: 'border-box', outline: 'none' },
+  saveBtn: { padding: '3px 10px', background: '#00d9ff', border: 'none', borderRadius: 3, color: '#000', fontSize: 10, fontWeight: 600, cursor: 'pointer' },
+  messagesArea: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 12, minHeight: 0 },
+  emptyState: { color: '#666', textAlign: 'center', marginTop: 40, fontSize: 11 },
+  inputSection: { padding: '0 12px 8px 12px', flexShrink: 0 },
+  textarea: { width: '100%', resize: 'none', padding: '8px', borderRadius: 4, border: '1px solid #333', background: '#1a1a2e', color: '#ccc', fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace", fontSize: 11, lineHeight: 1.4, boxSizing: 'border-box', outline: 'none' },
+  iconBtn: { width: 28, height: 28, borderRadius: 4, border: '1px solid #333', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 },
+  sendBtn: { width: 28, height: 28, borderRadius: 4, border: '1px solid #333', background: '#1a1a2e', color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  rightPanel: { width: 240, display: 'flex', flexDirection: 'column', flexShrink: 0, borderLeft: '1px solid #222', minHeight: 0 },
+  rightHeader: { padding: '8px 12px', borderBottom: '1px solid #222', flexShrink: 0 },
+  messagesList: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 10, minHeight: 0 },
+  rightFooter: { padding: '6px 12px', borderTop: '1px solid #222', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
 };
 
 export default JarvisPage;

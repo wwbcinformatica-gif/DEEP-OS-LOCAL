@@ -1,5 +1,5 @@
 identity:
-  assistant_name: fabio
+  assistant_name: Charon
   custom_color: ''
   user_name: Wilson
   voice: Charon
@@ -10,4 +10,4 @@ ollama:
   gpu_enabled: true
   gpu_layers: -1
 voice:
-  charon_toolset: basic
+  charon_toolset: full

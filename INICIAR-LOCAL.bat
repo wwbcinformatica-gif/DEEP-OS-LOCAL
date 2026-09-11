@@ -1,31 +1,43 @@
 @echo off
+chcp 65001 >nul 2>&1
+title DEEP-OS-LOCAL
+color 0A
+
+cd /d "%~dp0"
+
 echo ========================================
-echo  DEEP-OS-LOCAL - Iniciando...
+echo  DEEP-OS-LOCAL
 echo ========================================
 echo.
 
-echo [1/3] Instalando dependencias do backend...
-cd backend
-if not exist "venv" (
-    python -m venv venv
-)
-call venv\Scripts\activate
-pip install -r requirements.txt -q
-cd ..
+:: Matar processos antigos
+taskkill /f /im uvicorn.exe >nul 2>&1
+taskkill /f /im node.exe >nul 2>&1
+timeout /t 2 /nobreak >nul
 
-echo [2/3] Instalando dependencias do frontend...
-cd frontend
-if not exist "node_modules" (
-    npm install
-)
-cd ..
+:: Iniciar backend
+echo [1/2] Iniciando backend...
+start "Backend" cmd /k "cd /d C:\DEEP-OS-LOCAL\backend && call venv\Scripts\activate && uvicorn main:app --host 127.0.0.1 --port 8000"
 
-echo [3/3] Iniciando servidores...
+:: Esperar backend
+timeout /t 6 /nobreak >nul
+
+:: Iniciar frontend
+echo [2/2] Iniciando frontend...
+start "Frontend" cmd /k "cd /d C:\DEEP-OS-LOCAL\frontend && npx vite --mode development"
+
+:: Abrir navegador
+timeout /t 5 /nobreak >nul
+start http://127.0.0.1:5175
+
 echo.
-echo Backend: http://127.0.0.1:8000
-echo Frontend: http://127.0.0.1:5175
+echo ========================================
+echo  Tudo rodando!
+echo ========================================
 echo.
-
-call npm run dev
-
+echo  Backend:  http://127.0.0.1:8000
+echo  Frontend: http://127.0.0.1:5175
+echo.
+echo  Para fechar: STOP-TOTAL.bat
+echo.
 pause

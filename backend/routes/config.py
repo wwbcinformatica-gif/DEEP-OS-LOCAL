@@ -1,3 +1,4 @@
+import os
 from typing import Any
 
 import yaml
@@ -326,10 +327,133 @@ async def delete_mcp_server(name: str):
     return {"status": "success", "removed": name}
 
 class ApiKeyConfig(BaseModel):
+    groq_api_key: str = ""
+    openai_api_key: str = ""
+    gemini_api_key: str = ""
+    openrouter_api_key: str = ""
+    opencode_api_key: str = ""
+    mimo_api_key: str = ""
+    nvidia_api_key: str = ""
+
+def _sync_env_file(keys: dict):
+    """Atualiza o arquivo .env com as chaves de API fornecidas (apenas nao vazias)."""
+    from pathlib import Path
+    env_path = Path(__file__).resolve().parent.parent / ".env"
+    lines = []
+    env_map = {}
+    
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                env_map[k.strip()] = v.strip()
+    
+    for k, v in keys.items():
+        if v and v.strip():
+            env_map[k] = v.strip()
+    
+    new_lines = []
+    for line in lines:
+        if "=" in line and not line.startswith("#"):
+            k = line.split("=", 1)[0].strip()
+            if k in env_map:
+                new_lines.append(f"{k}={env_map[k]}")
+        else:
+            new_lines.append(line)
+    
+    for k, v in env_map.items():
+        if v and not any(line.startswith(f"{k}=") for line in new_lines):
+            new_lines.append(f"{k}={v}")
+    
+    env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+
+@router.get("/api-keys")
+async def get_all_api_keys():
+    try:
+        import json
+        from pathlib import Path
+        cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+        result = {}
+        if cfg_path.exists():
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        else:
+            data = {}
+        
+        key_map = {
+            "GROQ_API_KEY": "groq_api_key",
+            "OPENAI_API_KEY": "openai_api_key",
+            "GEMINI_API_KEY": "gemini_api_key",
+            "OPENROUTER_API_KEY": "openrouter_api_key",
+            "OPENCODE_API_KEY": "opencode_api_key",
+            "MIMO_API_KEY": "mimo_api_key",
+            "NVIDIA_API_KEY": "nvidia_api_key",
+        }
+        
+        from dotenv import load_dotenv
+        load_dotenv(env_path, override=False)
+        
+        for env_key, field in key_map.items():
+            val = data.get(field, "") or os.environ.get(env_key, "")
+            masked = val[:6] + "..." + val[-4:] if len(val) > 10 else "(vazia)"
+            result[field] = {"value": val, "masked": masked, "has_key": bool(val)}
+        
+        return result
+    except Exception:
+        return {}
+
+@router.put("/api-keys")
+async def update_all_api_keys(request_body: dict):
+    try:
+        import json, os
+        from pathlib import Path
+
+        field_to_env = {
+            "groq_api_key": "GROQ_API_KEY", "openai_api_key": "OPENAI_API_KEY",
+            "gemini_api_key": "GEMINI_API_KEY", "openrouter_api_key": "OPENROUTER_API_KEY",
+            "opencode_api_key": "OPENCODE_API_KEY", "mimo_api_key": "MIMO_API_KEY",
+            "nvidia_api_key": "NVIDIA_API_KEY",
+        }
+        env_to_field = {v: k for k, v in field_to_env.items()}
+
+        normalized = {}
+        for k, v in request_body.items():
+            v_str = v if isinstance(v, str) else ""
+            if k in field_to_env:
+                normalized[k] = v_str
+            elif k in env_to_field:
+                normalized[env_to_field[k]] = v_str
+            else:
+                normalized[k] = v_str
+
+        cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+        if cfg_path.exists():
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        else:
+            data = {}
+        data.update(normalized)
+        cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+
+        env_keys = {}
+        for field, env_key in field_to_env.items():
+            env_keys[env_key] = normalized.get(field, "")
+
+        _sync_env_file(env_keys)
+
+        for env_key, val in env_keys.items():
+            if val:
+                os.environ[env_key] = val
+
+        return {"status": "success", "message": "Chaves API salvas no servidor e no .env"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar chaves: {e}")
+
+# ─── Rota antiga /api-key (compatibilidade com frontend) ─────────────────
+class ApiKeyConfigLegacy(BaseModel):
     gemini_api_key: str = ""
 
 @router.get("/api-key")
-async def get_api_key():
+async def get_api_key_legacy():
     try:
         import json
         from pathlib import Path
@@ -344,9 +468,9 @@ async def get_api_key():
     return {"has_key": False, "masked": "(vazia)"}
 
 @router.put("/api-key")
-async def update_api_key(config: ApiKeyConfig):
+async def update_api_key_legacy(config: ApiKeyConfigLegacy):
     try:
-        import json
+        import json, os
         from pathlib import Path
         cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
         if cfg_path.exists():
@@ -355,9 +479,29 @@ async def update_api_key(config: ApiKeyConfig):
             data = {}
         data["gemini_api_key"] = config.gemini_api_key
         cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
-        return {"status": "success", "message": "Chave API salva no servidor"}
+        
+        _sync_env_file({"GEMINI_API_KEY": config.gemini_api_key})
+        os.environ["GEMINI_API_KEY"] = config.gemini_api_key
+        
+        return {"status": "success", "message": "Chave API salva no servidor e no .env"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar chave: {e}")
+
+@router.delete("/api-key")
+async def delete_api_key():
+    try:
+        import json, os
+        from pathlib import Path
+        cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+        if cfg_path.exists():
+            data = json.loads(cfg_path.read_text(encoding="utf-8"))
+            data.pop("gemini_api_key", None)
+            cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+        _sync_env_file({"GEMINI_API_KEY": ""})
+        os.environ.pop("GEMINI_API_KEY", None)
+        return {"status": "success", "message": "Chave API removida"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao remover chave: {e}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CATCH-ALL — SEMPRE NO FIM DO ARQUIVO

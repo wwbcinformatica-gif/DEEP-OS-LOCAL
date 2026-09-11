@@ -319,8 +319,9 @@ async def stream_chat(
     api_key: str = "",
 ):
     if provider == "llamacpp":
+        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = ensure_llamacpp_model(model)
+        status = await asyncio.to_thread(ensure_llamacpp_model, model)
         if status.get("error"):
             yield f"ERR: {status['error']}"
             return
@@ -381,8 +382,9 @@ async def complete_chat(
     api_key: str = "",
 ) -> str:
     if provider == "llamacpp":
+        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = ensure_llamacpp_model(model)
+        status = await asyncio.to_thread(ensure_llamacpp_model, model)
         if status.get("error"):
             return f"ERR: {status['error']}"
     messages = truncate_messages(messages)
@@ -648,8 +650,9 @@ async def stream_chat_with_tools(
     api_key: str = "",
 ):
     if provider == "llamacpp":
+        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = ensure_llamacpp_model(model)
+        status = await asyncio.to_thread(ensure_llamacpp_model, model)
         if status.get("error"):
             yield {"type": "content", "data": f"ERR: {status['error']}"}
             return
@@ -774,8 +777,9 @@ async def complete_chat_with_tools(
     api_key: str = "",
 ) -> dict:
     if provider == "llamacpp":
+        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = ensure_llamacpp_model(model)
+        status = await asyncio.to_thread(ensure_llamacpp_model, model)
         if status.get("error"):
             return {"type": "content", "data": f"ERR: {status['error']}", "reasoning": ""}
     messages = truncate_messages(messages)

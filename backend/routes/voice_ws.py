@@ -51,7 +51,20 @@ def _get_gemini_key() -> str:
     try:
         cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
         if cfg_path.exists():
-            return json.loads(cfg_path.read_text(encoding="utf-8")).get("gemini_api_key", "")
+            k = json.loads(cfg_path.read_text(encoding="utf-8")).get("gemini_api_key", "")
+            if k:
+                return k
+    except Exception:
+        pass
+    try:
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        if env_path.exists():
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
+                    v = line.split("=", 1)[1].strip()
+                    if v:
+                        os.environ["GEMINI_API_KEY"] = v
+                        return v
     except Exception:
         pass
     return ""
