@@ -1,0 +1,7 @@
+Crie um esquema de negócios detalhado e um plano de implementação para o projeto DEEP-AUREA, desenvolvido por Wilson Barbosa Coimbra. O modelo deve ser baseado na Arquitetura Multi-Tenancy e no Modelo de Negócio Software as a Service (SaaS).
+
+Diretrizes:
+1. Modelo de Negócio SaaS: Proponha planos de assinatura, estrutura de preços e estratégias de monetização para o DEEP-AUREA como uma plataforma multi-inquilino.
+2. Estratégia de Implementação Multi-Tenancy: Detalhe como garantir o isolamento lógico de dados e configurações para cada 'tenant' (usuário, equipe ou organização), utilizando a stack do projeto (Python, FastAPI, SQLite, Memória Vetorial).
+3. Adaptação Técnica: Descreva as modificações necessárias no backend, frontend e nos serviços de WebSocket para suportar a multi-tenancy.
+4. Segurança e Escalabilidade: Aborde estratégias para garantir a segurança e a escalabilidade do sistema com o crescimento do número de inquilinos.

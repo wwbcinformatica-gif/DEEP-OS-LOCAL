@@ -1,0 +1,13 @@
+identity:
+  assistant_name: fabio
+  custom_color: ''
+  user_name: Wilson
+  voice: Charon
+llamacpp:
+  gpu_enabled: true
+  gpu_layers: 999
+ollama:
+  gpu_enabled: true
+  gpu_layers: -1
+voice:
+  charon_toolset: basic

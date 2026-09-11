@@ -1,0 +1,1445 @@
+/* ── reset + tokens ───────────────────────────────────────────────────── */
+
+* {
+  box-sizing: border-box;
+}
+
+:root {
+  --accent: #007acc;
+  --accent-soft: rgba(0, 122, 204, 0.12);
+  --accent-line: rgba(0, 122, 204, 0.35);
+  --accent-2: #4da6e0;
+
+  /* VS Code font tokens */
+  --font-ui: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif;
+  --font-mono: 'Cascadia Code', 'Fira Code', 'SF Mono', 'Consolas', 'Courier New', monospace;
+  --font-size-xs: 11px;
+  --font-size-sm: 12px;
+  --font-size-base: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 15px;
+
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  font-feature-settings: 'ss01', 'ss02', 'cv01', 'cv11';
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* layout tokens */
+  --exp-w: 260px;
+  --chat-w: 360px;
+  --term-h: 200px;
+  --status-h: 24px;
+  --tab-h: 36px;
+}
+
+/* ── dark theme (VS Code-inspired) ──────────────────────────────────── */
+:root,
+:root[data-theme='dark'] {
+  color-scheme: dark;
+  --base-font-size: 15px;
+  --bg: #1e1e1e;
+  --bg-elev: rgba(30, 30, 30, 0.94);
+  --bg-2: #252526;
+  --bg-3: #2d2d2d;
+  --bg-editor: #1e1e1e;
+  --sidebar-bg: #252526;
+  --ink: #d4d4d4;
+  --ink-2: rgba(212, 212, 212, 0.85);
+  --muted: rgba(212, 212, 212, 0.55);
+  --quiet: rgba(212, 212, 212, 0.35);
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(0, 122, 204, 0.3);
+  --scroll-thumb: #424242;
+  --selection-fg: #1e1e1e;
+  --status-bg: #007acc;
+  --status-fg: #ffffff;
+  --tab-active-bg: #1e1e1e;
+  --tab-inactive-bg: #2d2d2d;
+  --input-bg: #3c3c3c;
+  --chat-user-bg: rgba(0, 122, 204, 0.08);
+  --chat-bot-bg: transparent;
+  --bg-active: #37373d;
+  --pink: #c586c0;
+  --teal: #4ec9b0;
+  --blue: #569cd6;
+  --cyan: #9cdcfe;
+  --green: #6a9955;
+  --yellow: #dcdcaa;
+  --orange: #ce9178;
+  --red: #f44747;
+  --thinking-bg: #252526;
+  --thinking-border: #3c3c3c;
+  --terminal-bg: #1e1e1e;
+}
+
+/* ── light theme (VS Code) ──────────────────────────────────────────── */
+:root[data-theme='light'] {
+  color-scheme: light;
+  --base-font-size: 15px;
+  --bg: #ffffff;
+  --bg-elev: rgba(255, 255, 255, 0.94);
+  --bg-2: #f3f3f3;
+  --bg-3: #ececec;
+  --bg-editor: #ffffff;
+  --sidebar-bg: #f3f3f3;
+  --ink: #1e1e1e;
+  --ink-2: rgba(30, 30, 30, 0.85);
+  --muted: rgba(30, 30, 30, 0.55);
+  --quiet: rgba(30, 30, 30, 0.4);
+  --line: rgba(0, 0, 0, 0.1);
+  --line-strong: rgba(0, 122, 204, 0.3);
+  --scroll-thumb: #c1c1c1;
+  --selection-fg: #ffffff;
+  --status-bg: #007acc;
+  --status-fg: #ffffff;
+  --tab-active-bg: #ffffff;
+  --tab-inactive-bg: #ececec;
+  --input-bg: #ffffff;
+  --chat-user-bg: rgba(0, 122, 204, 0.08);
+  --chat-bot-bg: transparent;
+  --bg-active: #e8e8e8;
+  --pink: #a84da8;
+  --teal: #2d9a8a;
+  --blue: #3b7bc9;
+  --cyan: #2b8ec4;
+  --green: #5a8a4a;
+  --yellow: #a68428;
+  --orange: #a64e00;
+  --red: #cd3131;
+  --thinking-bg: #f3f3f3;
+  --thinking-border: #d4d4d4;
+  --terminal-bg: #1e1e1e;
+}
+
+html {
+  scroll-behavior: smooth;
+  background: var(--bg);
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+  line-height: 1.5;
+  min-height: 100vh;
+  overflow: hidden;
+  transition:
+    background-color 0.2s ease,
+    color 0.2s ease;
+}
+
+/* ── Global monospace utility ────────────────────────────────────────── */
+.mono,
+code,
+pre,
+kbd {
+  font-family: var(--font-mono);
+}
+
+#root {
+  height: 100vh;
+}
+
+/* ── scrollbars ──────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+::selection {
+  background: var(--accent);
+  color: var(--selection-fg);
+}
+
+/* ── selection overrides ─────────────────────────────────────────────── */
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+input,
+textarea,
+select {
+  caret-color: var(--accent);
+}
+textarea {
+  scrollbar-width: thin;
+}
+option {
+  background: var(--bg-2);
+  color: var(--ink);
+}
+
+/* ── interactive states ──────────────────────────────────────────────── */
+button:active {
+  transform: scale(0.97);
+}
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--accent) !important;
+  outline: none !important;
+}
+button:hover,
+select:hover {
+  filter: brightness(1.2);
+}
+
+button:focus-visible,
+a:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ── keyframes ───────────────────────────────────────────────────────── */
+@keyframes blink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-6px); }
+}
+
+/* ── utility classes ─────────────────────────────────────────────────── */
+.panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+
+.panel-title {
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+}
+
+.btn {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: '3px';
+  color: var(--muted);
+  cursor: pointer;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  transition: filter 0.15s, border-color 0.15s;
+}
+
+.btn-accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn:hover {
+  border-color: var(--accent);
+}
+
+.input {
+  background: var(--input-bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink);
+  padding: 5px 8px;
+  outline: none;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-base);
+}
+
+/* VS Code select style */
+.select-input {
+  background: var(--input-bg);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink);
+  padding: 4px 6px;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  outline: none;
+  cursor: pointer;
+}
+.select-input:focus {
+  border-color: var(--accent) !important;
+}
+
+.status-bar {
+  height: var(--status-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  background: var(--status-bg);
+  color: var(--status-fg);
+  font-family: var(--font-ui);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  overflow: hidden;
+  min-width: 0;
+}
+
+.status-bar .status-left {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+
+.status-bar .status-left > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.status-bar .status-right {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+  margin-left: 12px;
+}
+
+.status-bar .status-right > span {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.drag-handle-h {
+  width: 3px;
+  height: 100%;
+  background: transparent;
+  cursor: col-resize;
+  flex-shrink: 0;
+  z-index: 10;
+  transition: background 0.15s;
+  position: relative;
+}
+.drag-handle-h::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -4px;
+  right: -4px;
+  bottom: 0;
+}
+.drag-handle-h:hover {
+  background: var(--accent-soft);
+}
+
+.drag-handle-v {
+  height: 3px;
+  width: 100%;
+  background: transparent;
+  cursor: row-resize;
+  flex-shrink: 0;
+  z-index: 10;
+  transition: background 0.15s;
+}
+.drag-handle-v:hover {
+  background: var(--accent-soft);
+}
+
+/* ── Chat vertical resize handle (terminal-style, drag upward to expand) ── */
+.drag-handle-chat-h {
+  height: 6px;
+  flex-shrink: 0;
+  cursor: row-resize;
+  position: relative;
+  z-index: 20;
+  touch-action: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  background: var(--line);
+  transition:
+    background 0.15s,
+    height 0.05s;
+}
+.drag-handle-chat-h:hover,
+.drag-handle-chat-h:active {
+  background: var(--accent-line);
+  height: 8px;
+}
+/* Grip dots */
+.drag-handle-chat-h .grip-dot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--muted);
+  transition: background 0.15s;
+}
+.drag-handle-chat-h:hover .grip-dot,
+.drag-handle-chat-h:active .grip-dot {
+  background: var(--accent);
+}
+
+/* ── Thinking progress bar ───────────────────────────────────────────── */
+@keyframes thinkingProgress {
+  0% {
+    transform: translateX(-100%);
+  }
+  50% {
+    transform: translateX(200%);
+  }
+  100% {
+    transform: translateX(400%);
+  }
+}
+
+@keyframes dotPulse {
+  0%, 80%, 100% {
+    transform: scale(0.6);
+    opacity: 0.4;
+  }
+  40% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* ── Toast animation ────────────────────────────────────────────────── */
+@keyframes toastIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ── Stuck / Travamento pulse ───────────────────────────────────────── */
+@keyframes stuckPulse {
+  0%,
+  100% {
+    opacity: 0.7;
+    box-shadow: 0 0 4px rgba(244, 71, 71, 0.3);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 16px rgba(244, 71, 71, 0.7);
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   MARKDOWN RENDER — Estilo VS Code puro
+   ═════════════════════════════════════════════════════════════════════ */
+
+.markdown-body {
+  width: 100%;
+  max-width: 100%;
+  font-family: var(--font-mono), 'Cascadia Code', 'Fira Code', Consolas, monospace !important;
+  font-size: 13px !important;
+  line-height: 1.5;
+  color: #cccccc !important;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+.markdown-body > *:first-child {
+  margin-top: 0;
+}
+.markdown-body > *:last-child {
+  margin-bottom: 0;
+}
+
+/* ─── Headings (VS Code) ──────────────────────────────────────────── */
+.markdown-heading {
+  font-weight: 600;
+  margin: 1em 0 0.5em 0;
+  line-height: 1.3;
+  color: #cccccc !important;
+  font-family: var(--font-mono), 'Cascadia Code', 'Fira Code', Consolas, monospace !important;
+}
+.markdown-h1 {
+  font-size: 1.6em;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.3em;
+}
+.markdown-h2 {
+  font-size: 1.35em;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 0.25em;
+}
+.markdown-h3 {
+  font-size: 1.15em;
+}
+.markdown-h4 {
+  font-size: 1.05em;
+}
+.markdown-h5 {
+  font-size: 1em;
+}
+.markdown-h6 {
+  font-size: 0.9em;
+  color: var(--muted);
+}
+
+/* ─── Paragraph (VS Code) ───────────────────────────────────────── */
+.markdown-paragraph {
+  margin: 0.5em 0;
+  line-height: 1.5;
+  font-size: 13px !important;
+  font-family: var(--font-mono), 'Cascadia Code', 'Fira Code', Consolas, monospace !important;
+  color: #cccccc !important;
+}
+
+/* ─── Inline Code (VS Code) ─────────────────────────────────────── */
+.markdown-inline-code {
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+  font-size: 0.9em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #ce9178;
+  border: 1px solid var(--line);
+}
+
+/* ─── Bold / Italic ───────────────────────────────────────────────── */
+.markdown-body strong {
+  font-weight: 700;
+  color: var(--ink-2);
+}
+.markdown-body em {
+  font-style: italic;
+}
+
+/* ─── Links ────────────────────────────────────────────────────────── */
+.markdown-link {
+  color: var(--cyan);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(156, 220, 254, 0.4);
+  transition: text-decoration-color 0.15s;
+}
+.markdown-link:hover {
+  text-decoration-color: var(--cyan);
+  filter: brightness(1.3);
+}
+
+/* ─── Horizontal Rule ─────────────────────────────────────────────── */
+.markdown-hr {
+  border: none;
+  border-top: 1px solid var(--line-strong);
+  margin: 1.2em 0;
+}
+
+/* ─── Lists (VS Code) ───────────────────────────────────────────── */
+.markdown-list {
+  margin: 0.5em 0;
+  padding-left: 1.8em;
+  list-style: disc;
+}
+.markdown-list-item {
+  margin: 0.3em 0;
+  line-height: 1.5;
+  font-size: 13px !important;
+  font-family: var(--font-mono), 'Cascadia Code', 'Fira Code', Consolas, monospace !important;
+  color: #cccccc !important;
+}
+
+/* ─── Code Blocks (VS Code editor style) ────────────────────────── */
+.markdown-code-block {
+  position: relative;
+  margin: 0.8em 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #1e1e1e;
+  overflow: hidden;
+  width: 100%;
+}
+.markdown-code-lang {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  padding: 5px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #2d2d2d;
+  user-select: none;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+}
+.markdown-pre {
+  margin: 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Consolas', 'Courier New', monospace;
+  font-size: 13px;
+  line-height: 1.55;
+  tab-size: 4;
+  color: #d4d4d4;
+  background: #1e1e1e;
+}
+.markdown-pre code {
+  font-family: inherit;
+  background: none !important;
+  padding: 0 !important;
+  border: none !important;
+  white-space: pre;
+}
+.markdown-copy-btn {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--bg-3);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 2px 6px;
+  font-size: 12px;
+}
+
+/* ── Tabs / Abas (Editor Panel) ────────────────────────────────────── */
+.tab,
+.aba,
+.editor-tab {
+  height: auto !important;
+  padding: 6px 12px !important;
+  line-height: 1.2 !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  overflow: visible !important;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: none;
+  border-bottom: none !important;
+  box-shadow: none !important;
+  text-decoration: none !important;
+}
+.editor-tab.active {
+  background: var(--tab-active-bg);
+  color: #f0f0f0;
+}
+.editor-tab.inactive {
+  background: var(--tab-inactive-bg);
+  color: #999;
+}
+.editor-tab:hover {
+  filter: brightness(1.3);
+}
+
+/* ─── Tables (VS Code) ──────────────────────────────────────────── */
+.markdown-table-wrapper {
+  overflow-x: auto;
+  margin: 0.8em 0;
+  width: 100%;
+}
+.markdown-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--font-mono), 'Consolas', 'Fira Code', monospace;
+  background: #1a1a1a;
+  border: 1px solid #333;
+}
+.markdown-th {
+  padding: 6px 10px;
+  border: 1px solid #333;
+  background: #252525;
+  font-weight: 600;
+  text-align: left;
+  color: #cccccc;
+  white-space: nowrap;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.markdown-td {
+  padding: 5px 10px;
+  border: 1px solid #333;
+  color: #cccccc;
+  vertical-align: top;
+}
+.markdown-table tr:nth-child(even) .markdown-td {
+  background: rgba(255, 255, 255, 0.02);
+}
+.markdown-table tr:hover .markdown-td {
+  background: rgba(255, 255, 255, 0.05);
+}
+.markdown-table td:first-child,
+.markdown-table th:first-child {
+  text-align: center;
+  width: 30px;
+  color: #808080;
+}
+
+/* ─── Stream cursor ───────────────────────────────────────────────── */
+.markdown-body + span[style*='animation: blink'] {
+  display: inline-block;
+}
+
+/* ─── Responsivo: usa 100% da largura no chat ─────────────────────── */
+.markdown-body pre {
+  max-width: 100%;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+/* ==========================================================
+   FORÇA BRUTA DEFINITIVA PARA O SLIDER MIGRAR PARA AS LATERAIS
+   ========================================================== */
+
+/* Força global: aplica font-size a TODOS os elementos-raiz e garante herança */
+html,
+body,
+#root {
+  font-size: var(--base-font-size, 15px) !important;
+}
+
+/* Força herança em TODOS os elementos da árvore DOM */
+* {
+  font-size: inherit !important;
+}
+
+/* Override específico para containers principais dos painéis do VS Code */
+aside,
+[id*='explorer'],
+[class*='explorer'],
+[class*='fileExplorer'],
+[id*='chat'],
+[class*='chat'],
+[class*='sessions'],
+[id*='sidebar'],
+[class*='sidebar'],
+[role='navigation'],
+[role='complementary'],
+.panel,
+[class*='panel'],
+.tree,
+[class*='tree'],
+.list,
+[class*='list'],
+.tabs,
+[class*='tab'],
+[class*='activityBar'],
+[class*='primaryBar'] {
+  font-size: var(--base-font-size, 15px) !important;
+}
+
+/* Obriga filhos diretos a herdarem (garante cascata) */
+aside *,
+[id*='explorer'] *,
+[class*='explorer'] *,
+[class*='fileExplorer'] *,
+[id*='chat'] *,
+[class*='chat'] *,
+[class*='sessions'] *,
+[id*='sidebar'] *,
+[class*='sidebar'] *,
+[role='navigation'] *,
+[role='complementary'] *,
+.panel *,
+[class*='panel'] *,
+.tree *,
+[class*='tree'] *,
+.list *,
+[class*='list'] *,
+.tabs *,
+[class*='tab'] *,
+[class*='activityBar'] *,
+[class*='primaryBar'] * {
+  font-size: inherit !important;
+}
+
+/* Corrige inputs, textareas e buttons que podem ter font-size fixo */
+textarea,
+input,
+button,
+select,
+[role='button'] {
+  font-size: var(--base-font-size, 15px) !important;
+}
+
+/* Garante que itens de lista e tree items também herdem */
+li,
+li *,
+[role='treeitem'],
+[role='treeitem'] *,
+[role='listitem'],
+[role='listitem'] *,
+[role='option'],
+[role='option'] * {
+  font-size: inherit !important;
+}
+
+/* Force para spans, divs, paragraphs e labels que são comuns */
+span,
+div,
+p,
+label,
+a,
+code,
+pre {
+  font-size: inherit !important;
+}
+
+/* Toast animation */
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Custom range slider for space settings */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  outline: none;
+}
+
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00d9ff 0%, #00ff88 100%);
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 217, 255, 0.4);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+
+input[type='range']::-webkit-slider-thumb:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 16px rgba(0, 217, 255, 0.6);
+}
+
+input[type='range']::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #00d9ff 0%, #00ff88 100%);
+  cursor: pointer;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  box-shadow: 0 2px 8px rgba(0, 217, 255, 0.4);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ── scrollbar ────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.25);
+}
+.saas-sidebar ::-webkit-scrollbar {
+  width: 4px;
+}
+.saas-sidebar ::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.1);
+}
+
+/* ── Main content (desktop default) ───────────────────────────────── */
+.saas-main-content {
+  flex: 1;
+  margin-left: 220px;
+  height: 100vh;
+  overflow-y: auto;
+  background: transparent;
+  position: relative;
+  z-index: 1;
+  transition: margin-left 0.3s ease;
+}
+.saas-main-content.scrollable {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Sidebar (desktop default) ────────────────────────────────────── */
+.saas-sidebar {
+  width: 220px;
+  height: 100vh;
+  background: var(--saas-bg-sidebar);
+  backdrop-filter: blur(var(--saas-glass-blur));
+  -webkit-backdrop-filter: blur(var(--saas-glass-blur));
+  border-right: 1px solid var(--saas-border);
+  display: flex;
+  flex-direction: column;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  position: fixed;
+  left: 0;
+  top: 0;
+  z-index: 100;
+  overflow: visible;
+  transition: transform 0.3s ease;
+}
+
+/* ── Mobile menu button (hidden on desktop) ───────────────────────── */
+.mobile-menu-btn {
+  display: none;
+}
+
+/* ── Mobile overlay (hidden on desktop) ───────────────────────────── */
+.mobile-overlay {
+  display: none;
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+   RESPONSIVE — Mobile / Tablet
+   ═════════════════════════════════════════════════════════════════════ */
+
+/* ── Tablet (<=900px) ─────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  :root {
+    --exp-w: 200px;
+    --chat-w: 280px;
+  }
+
+  /* Sidebar: hidden, use hamburger */
+  .saas-sidebar {
+    width: 220px !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.3s ease !important;
+  }
+  .saas-sidebar.open {
+    transform: translateX(0) !important;
+  }
+
+  /* Main content: full width */
+  .saas-main-content {
+    margin-left: 0 !important;
+  }
+
+  /* Hamburger menu button */
+  .mobile-menu-btn {
+    display: flex !important;
+    position: fixed !important;
+    top: 8px !important;
+    left: 8px !important;
+    z-index: 300 !important;
+    width: 36px !important;
+    height: 36px !important;
+    background: rgba(0, 0, 0, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 8px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    color: white !important;
+    font-size: 18px !important;
+  }
+
+  /* Overlay */
+  .mobile-overlay {
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: rgba(0, 0, 0, 0.4) !important;
+    z-index: 199 !important;
+  }
+
+  /* Charon: no tablet, painel lado a lado como no PC */
+  .charon-chat-layout {
+    flex-direction: row !important;
+    overflow: hidden !important;
+  }
+  .charon-left-panel {
+    flex: 1 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+  .charon-right-panel {
+    width: 240px !important;
+    border-left: 1px solid #222 !important;
+    border-top: none !important;
+    flex-shrink: 0 !important;
+    min-height: 0 !important;
+    display: flex !important;
+    overflow: hidden !important;
+  }
+
+  .markdown-body { font-size: 12px !important; }
+  .markdown-paragraph { font-size: 12px !important; }
+  .markdown-list-item { font-size: 12px !important; }
+  .markdown-pre { font-size: 11px !important; padding: 8px 10px; }
+  .markdown-code-block { max-width: 100%; }
+  .markdown-table { font-size: 11px; }
+  .markdown-th { padding: 4px 6px; font-size: 10px; }
+  .markdown-td { padding: 4px 6px; }
+  .markdown-h1 { font-size: 1.3em; }
+  .markdown-h2 { font-size: 1.15em; }
+  .markdown-h3 { font-size: 1.05em; }
+}
+
+/* ── Desktop (>=901px) — compact layout ──────────────────────────── */
+@media (min-width: 901px) {
+  /* PricingPage: compact header */
+  .pricing-container {
+    padding: 20px 32px !important;
+  }
+  .pricing-title {
+    font-size: 32px !important;
+    margin-bottom: 8px !important;
+  }
+  .pricing-subtitle {
+    font-size: 14px !important;
+    margin-bottom: 0 !important;
+  }
+  /* PricingPage: compact grid */
+  .pricing-plan-card {
+    padding: 20px !important;
+    max-width: 280px !important;
+  }
+  .pricing-price {
+    font-size: 36px !important;
+  }
+  .pricing-feature {
+    font-size: 13px !important;
+    padding: 6px 0 !important;
+  }
+  .pricing-cta {
+    padding: 10px 16px !important;
+    font-size: 14px !important;
+  }
+  /* PricingPage: compact Jarvis banner */
+  .pricing-container > div:last-of-type {
+    padding: 16px 24px !important;
+    margin-bottom: 16px !important;
+  }
+
+  /* PixPage: compact */
+  .pix-page-container {
+    padding: 20px 32px !important;
+  }
+
+  /* Admin Dashboard: compact cards */
+  .admin-dashboard-card {
+    padding: 16px !important;
+    margin-bottom: 12px !important;
+  }
+
+  /* SettingsPage: compact */
+  .settings-section {
+    padding: 16px !important;
+  }
+}
+
+/* ── Desktop Large (>=1200px) — even more compact ────────────────── */
+@media (min-width: 1200px) {
+  .pricing-container {
+    padding: 16px 40px !important;
+  }
+  .pricing-title {
+    font-size: 28px !important;
+    margin-bottom: 4px !important;
+  }
+  .pricing-subtitle {
+    font-size: 13px !important;
+  }
+  .pricing-plan-card {
+    padding: 16px !important;
+    max-width: 260px !important;
+  }
+  .pricing-price {
+    font-size: 32px !important;
+  }
+  .pricing-feature {
+    font-size: 12px !important;
+    padding: 4px 0 !important;
+  }
+}
+
+/* ── Mobile (<=600px) ─────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  :root {
+    --exp-w: 0px;
+    --chat-w: 100vw;
+    --status-h: 20px;
+    --tab-h: 32px;
+  }
+
+  body {
+    font-size: 12px;
+    overflow: visible !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  #root {
+    height: auto !important;
+    min-height: 100dvh !important;
+    overflow: visible !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Override inline style overflow:hidden on appContainer */
+  .app-container,
+  div[style*="overflow: hidden"],
+  div[style*="overflow:hidden"] {
+    overflow: visible !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Sidebar: menor no mobile, sem blur (cor solida) */
+  .saas-sidebar {
+    width: 220px !important;
+    height: 100vh !important;
+    flex-direction: column !important;
+    position: fixed !important;
+    top: 0 !important;
+    bottom: auto !important;
+    left: 0 !important;
+    right: auto !important;
+    border-right: 1px solid var(--saas-border) !important;
+    border-top: none !important;
+    z-index: 250 !important;
+    padding: 0 !important;
+    transform: translateX(-100%) !important;
+    transition: transform 0.3s ease !important;
+    overflow-y: auto !important;
+    background: #0a0a1a !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+  }
+
+  .saas-sidebar.open {
+    transform: translateX(0) !important;
+  }
+
+  .saas-sidebar .sidebar-label,
+  .saas-sidebar span {
+    display: inline !important;
+  }
+
+  .saas-sidebar .sidebar-logo {
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  /* Main content: full width + scrollable */
+  .saas-main-content {
+    margin-left: 0 !important;
+    padding-top: 50px !important;
+    height: auto !important;
+    min-height: 100vh !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .saas-main-content.scrollable {
+    overflow-y: auto !important;
+  }
+
+  /* Charon: scrollable no mobile, container sem overflow hidden */
+  .charon-page {
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: calc(100vh - 50px) !important;
+  }
+  .charon-chat-layout {
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: calc(100vh - 100px) !important;
+  }
+
+  /* Jarvis: scrollable no mobile */
+  .jarvis-container {
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: calc(100vh - 50px) !important;
+    padding: 12px !important;
+  }
+
+  /* Inputs, selects, textareas: full width no mobile */
+  input, select, textarea {
+    max-width: 100% !important;
+    width: 100% !important;
+  }
+
+  /* Modais: aproveitar tela toda */
+  .jarvis-container div[style*="maxWidth: 400"] {
+    max-width: 95% !important;
+    width: 95% !important;
+  }
+
+  /* Botoes e campos: mais largos */
+  .jarvis-container button {
+    min-height: 36px !important;
+  }
+
+  /* Hamburger menu button */
+  .mobile-menu-btn {
+    display: flex !important;
+    position: fixed !important;
+    top: 8px !important;
+    left: 8px !important;
+    z-index: 300 !important;
+    width: 36px !important;
+    height: 36px !important;
+    background: rgba(0, 0, 0, 0.8) !important;
+    border: 1px solid rgba(255, 255, 255, 0.3) !important;
+    border-radius: 8px !important;
+    align-items: center !important;
+    justify-content: center !important;
+    cursor: pointer !important;
+    color: white !important;
+    font-size: 18px !important;
+  }
+
+  /* Overlay */
+  .mobile-overlay {
+    display: block !important;
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    background: rgba(0, 0, 0, 0.4) !important;
+    z-index: 199 !important;
+  }
+
+  /* Charon: painel em coluna no mobile */
+  .charon-chat-layout {
+    flex-direction: column !important;
+    overflow-y: auto !important;
+  }
+  .charon-left-panel {
+    flex: none !important;
+    min-height: 45vh !important;
+    max-height: 45vh !important;
+  }
+  .charon-right-panel {
+    width: 100% !important;
+    border-left: none !important;
+    border-top: 1px solid #222 !important;
+    flex: 1 !important;
+    min-height: 45vh !important;
+    display: flex !important;
+  }
+  .charon-page {
+    font-size: 11px !important;
+  }
+
+  /* Main content: scrollable no mobile */
+  .saas-main-content {
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* Jarvis: header compacto no mobile, selects menores */
+  .jarvis-container > div:first-child {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+  }
+  .jarvis-container > div:first-child > div:last-child {
+    flex-direction: row !important;
+    align-items: center !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    width: 100% !important;
+    justify-content: flex-end !important;
+  }
+  .jarvis-container select {
+    font-size: 11px !important;
+    padding: 4px 6px !important;
+    max-width: 120px !important;
+  }
+  .jarvis-container .jarvis-icon, .jarvis-container div[style*="jarvisIcon"] {
+    width: 40px !important;
+    height: 40px !important;
+    font-size: 20px !important;
+  }
+  .jarvis-container h1 {
+    font-size: 18px !important;
+  }
+  .jarvis-container p {
+    font-size: 11px !important;
+  }
+
+  /* Status bar */
+  .status-bar { padding: 0 6px; font-size: 10px; }
+
+  /* Panels */
+  .panel-header { padding: 4px 8px; }
+  .panel-title { font-size: 10px; }
+
+  /* Buttons & inputs: menores */
+  .btn { padding: 2px 6px; font-size: 10px; }
+  .input { padding: 3px 6px; font-size: 12px; }
+
+  /* Markdown: fontes menores */
+  .markdown-body { font-size: 10px !important; }
+  .markdown-paragraph { font-size: 10px !important; }
+  .markdown-list-item { font-size: 10px !important; }
+  .markdown-pre { font-size: 9px !important; padding: 4px 6px; }
+  .markdown-h1 { font-size: 1.15em; }
+  .markdown-h2 { font-size: 1.05em; }
+  .markdown-h3 { font-size: 1em; }
+  .markdown-copy-btn { font-size: 10px; padding: 1px 4px; }
+
+  /* Tabs: menores */
+  .editor-tab { padding: 3px 6px !important; font-size: 10px; }
+
+  /* Charon: tabs e config menores */
+  .charon-tabs button { padding: 4px 6px !important; font-size: 9px !important; }
+  .charon-page input { padding: 3px 6px !important; font-size: 10px !important; border-radius: 3px !important; }
+  .charon-page textarea { font-size: 10px !important; padding: 4px 6px !important; border-radius: 3px !important; }
+  .charon-page button { padding: 3px 8px !important; font-size: 9px !important; border-radius: 3px !important; }
+
+  /* Config panels: menores e alinhados */
+  .charon-page div[style*="background: #111"] { padding: 8px !important; margin-bottom: 8px !important; border-radius: 6px !important; }
+  .charon-page h3 { font-size: 11px !important; margin: 0 0 6px 0 !important; }
+
+  /* Voice grid: 2 colunas, cartões menores */
+  .charon-page div[style*="gridTemplateColumns"] { grid-template-columns: repeat(2, 1fr) !important; gap: 4px !important; }
+  .charon-page div[style*="gridTemplateColumns"] button { padding: 4px 4px !important; border-width: 1px !important; border-radius: 4px !important; }
+  .charon-page div[style*="gridTemplateColumns"] button span { font-size: 10px !important; }
+
+  /* Charon header: menores */
+  .charon-left-panel div[style*="borderBottom"] { padding: 4px 8px !important; }
+  .charon-right-panel div[style*="borderBottom"] { padding: 4px 8px !important; }
+
+  /* Charon mensagens: padding menor */
+  .charon-page div[style*="marginBottom: 10"] { margin-bottom: 6px !important; padding: 4px 6px !important; }
+
+  /* Charon input section: padding menor */
+  .charon-left-panel div[style*="padding: 0 16px"] { padding: 0 8px 4px 8px !important; }
+  .charon-left-panel div[style*="padding: 12"] { padding: 6px !important; }
+
+  /* Resize handle */
+  .drag-handle-chat-h { height: 8px; }
+  .grip-dot { width: 4px; height: 4px; }
+
+  /* Auth/Login forms: full width */
+  .auth-container { padding: 12px !important; overflow-y: auto !important; }
+  .auth-card { max-width: 100% !important; padding: 16px 12px !important; }
+  .auth-card h1 { font-size: 20px !important; }
+  .auth-card input { padding: 6px 10px !important; font-size: 13px !important; }
+  .auth-card button { padding: 8px 16px !important; font-size: 13px !important; }
+
+  /* Jarvis page */
+  .jarvis-container { padding: 6px !important; }
+
+  /* Pricing page: ainda menor */
+  .pricing-container { padding: 12px 8px !important; overflow-y: auto !important; height: auto !important; }
+  .pricing-title { font-size: 18px !important; }
+  .pricing-subtitle { font-size: 11px !important; }
+  .pricing-plan-card { padding: 12px !important; margin-bottom: 10px !important; }
+  .pricing-price { font-size: 22px !important; }
+  .pricing-feature { font-size: 11px !important; padding: 4px 0 !important; }
+  .pricing-cta { padding: 8px 12px !important; font-size: 12px !important; width: 100% !important; }
+  .pricing-jarvis-banner { flex-direction: column !important; padding: 10px !important; }
+  .pricing-download-btn { width: 100% !important; justify-content: center !important; }
+
+  /* Settings: inputs e secoes menores */
+  .charon-page div[style*="background: #111"] { padding: 10px !important; }
+
+  /* Main content padding top menor */
+  .saas-main-content {
+    padding-top: 50px !important;
+  }
+}
+
+/* ── Mobile Landscape (<=600px + landscape) ──────────────────────── */
+@media (max-width: 600px) and (orientation: landscape) {
+  /* Charon: lado a lado como no PC */
+  .charon-chat-layout {
+    flex-direction: row !important;
+    overflow: hidden !important;
+  }
+  .charon-left-panel {
+    flex: 1 !important;
+    min-height: 0 !important;
+    max-height: none !important;
+  }
+  .charon-right-panel {
+    width: 240px !important;
+    border-left: 1px solid #222 !important;
+    border-top: none !important;
+    flex-shrink: 0 !important;
+    min-height: 0 !important;
+    display: flex !important;
+    overflow: hidden !important;
+  }
+
+  /* Main content: menos padding top em landscape */
+  .saas-main-content {
+    padding-top: 44px !important;
+  }
+
+  /* Hamburger: menor em landscape */
+  .mobile-menu-btn {
+    top: 6px !important;
+    left: 6px !important;
+    width: 32px !important;
+    height: 32px !important;
+    font-size: 16px !important;
+  }
+}

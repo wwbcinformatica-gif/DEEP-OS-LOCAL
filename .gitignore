@@ -1,0 +1,96 @@
+﻿# Modelos de IA (grandes demais para versionar)
+*.gguf
+*.bin
+
+# DependÃªncias
+node_modules/
+venv/
+__pycache__/
+*.pyc
+
+# Build
+dist/
+.vite/
+
+# Dados
+data/
+*.db
+*.sqlite
+
+# Logs
+logs/
+*.log
+server_stdout.log
+
+# Ambiente
+.env
+.env.local
+
+# API keys (nao commitar - cada VPS tem a sua)
+backend/config/api_keys.json
+
+# Chave de assinatura dos JWT (gerada automaticamente na 1a execucao).
+# Se vazar, qualquer pessoa forja tokens validos e se passa por qualquer tenant.
+backend/config/jwt_secret.key
+
+# Pessoal (dados sensÃ­veis)
+pessoal/
+
+# BinÃ¡rios do llama.cpp (baixar separadamente)
+bin/
+
+# Arquivos grandes
+*.rar
+*.zip
+*.7z
+
+# Fotos e capturas pessoais
+backend/pictures/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+Thumbs.db
+.DS_Store
+
+# MiMo Code (portable - each dev installs their own)
+.mimocode/
+
+data/plans.json
+
+# â”€â”€â”€ Arquivos locais com informacao sensivel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# Relatorios de diagnostico e logs de sessao podem conter senhas, chaves de
+# API e caminhos internos. NUNCA versionar.
+alteraÃ§Ãµes*.txt
+alteracoes*.txt
+
+*.secrets.txt
+
+# Arquivos perdidos/restaurados pelo editor
+*.orig
+*.rej
+*.bak
+*~
+
+# Build do frontend SaaS (gerado por `npm run build:saas`).
+#
+# Por que ignorar: era versionado, e por isso CADA `git reset --hard` (usado
+# pelo deploy) trazia de volta a build ANTIGA para o repositorio. O nginx serve
+# de /var/www/deep-os/frontend/dist-saas (atualizado pelo deploy), mas manter
+# a build no git poluia o status e criava commits so com arquivos gerados.
+#
+# O .gitignore so tinha `dist/`, que NAO cobre `dist-saas/`.
+dist-saas/
+
+# Indice do RAG local (gerado por tools/rag_local.py indexar)
+.rag/
+Modelfile
+
+# Scripts de verificacao pontual (nao fazem parte do projeto)
+verifica-*.cjs
+check-*.cjs
+

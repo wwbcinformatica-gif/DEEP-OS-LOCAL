@@ -1,0 +1,49 @@
+"""
+Tool declarations combinadas do DEEP-OS.
+Descrições encurtadas para reduzir latência do Gemini Live.
+"""
+import sys
+from pathlib import Path
+
+_ACTIONS_DIR = Path(__file__).resolve().parent.parent / "actions_mark"
+if str(_ACTIONS_DIR) not in sys.path:
+    sys.path.insert(0, str(_ACTIONS_DIR))
+
+MARKL_TOOLS = [
+    {"name": "open_app", "description": "Opens any application on the computer.", "parameters": {"type": "OBJECT", "properties": {"app_name": {"type": "STRING", "description": "App name (Chrome, Spotify, notepad)"}}, "required": ["app_name"]}},
+    {"name": "web_search_markl", "description": "Web search (search, news, research, price, compare).", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING", "description": "Search query"}, "mode": {"type": "STRING", "description": "search|news|research|price|compare"}}, "required": ["query"]}},
+    {"name": "system_status", "description": "System metrics: CPU, RAM, GPU, temperature.", "parameters": {"type": "OBJECT", "properties": {}, "required": []}},
+    {"name": "weather_report", "description": "Weather report for a city.", "parameters": {"type": "OBJECT", "properties": {"city": {"type": "STRING", "description": "City name"}}, "required": ["city"]}},
+    {"name": "send_message", "description": "Send message via WhatsApp/Telegram.", "parameters": {"type": "OBJECT", "properties": {"receiver": {"type": "STRING", "description": "Recipient"}, "message_text": {"type": "STRING", "description": "Message"}, "platform": {"type": "STRING", "description": "WhatsApp|Telegram"}}, "required": ["receiver", "message_text", "platform"]}},
+    {"name": "reminder", "description": "Set a timed reminder.", "parameters": {"type": "OBJECT", "properties": {"date": {"type": "STRING", "description": "YYYY-MM-DD"}, "time": {"type": "STRING", "description": "HH:MM"}, "message": {"type": "STRING", "description": "Reminder text"}}, "required": ["date", "time", "message"]}},
+    {"name": "youtube_video", "description": "Control YouTube: play, summarize, trending.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "play|summarize|trending"}, "query": {"type": "STRING", "description": "Search query"}}, "required": []}},
+    {"name": "screen_process", "description": "Capture screen or webcam for analysis.", "parameters": {"type": "OBJECT", "properties": {"angle": {"type": "STRING", "description": "screen|camera"}, "text": {"type": "STRING", "description": "Question about the image"}}, "required": ["text"]}},
+    {"name": "computer_settings", "description": "Volume, brightness, WiFi, power, shortcuts.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "Action to perform"}, "value": {"type": "STRING", "description": "Value (volume level, text, etc.)"}}, "required": []}},
+    {"name": "computer_control", "description": "Mouse/keyboard: type, click, hotkeys, scroll, screenshot.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "type|click|hotkey|press|scroll|move|copy|paste|screenshot|wait|focus_window"}, "text": {"type": "STRING", "description": "Text to type"}, "x": {"type": "INTEGER", "description": "X coord"}, "y": {"type": "INTEGER", "description": "Y coord"}, "keys": {"type": "STRING", "description": "Key combo (ctrl+c)"}, "key": {"type": "STRING", "description": "Single key (enter)"}}, "required": ["action"]}},
+    {"name": "browser_control", "description": "Control web browser: open, search, click, type, scroll.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "go_to|search|click|type|scroll|new_tab|close_tab|screenshot"}, "url": {"type": "STRING", "description": "URL"}, "query": {"type": "STRING", "description": "Search query"}, "text": {"type": "STRING", "description": "Text to type"}}, "required": ["action"]}},
+    {"name": "file_controller", "description": "Manage files: list, create, delete, move, copy, rename, read, write.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "list|create_file|create_folder|delete|move|copy|rename|read|write|find"}, "path": {"type": "STRING", "description": "File path (or: desktop, downloads, home)"}, "content": {"type": "STRING", "description": "Content for write"}}, "required": ["action"]}},
+    {"name": "desktop_control", "description": "Desktop: wallpaper, organize, list windows.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "wallpaper|organize|clean|list|stats"}}, "required": ["action"]}},
+    {"name": "code_helper", "description": "Write, edit, explain, run code.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "write|edit|explain|run"}, "description": {"type": "STRING", "description": "What the code does"}, "language": {"type": "STRING", "description": "python|js|ts"}}, "required": ["action"]}},
+    {"name": "dev_agent", "description": "Build complete projects from scratch.", "parameters": {"type": "OBJECT", "properties": {"description": {"type": "STRING", "description": "What the project does"}, "language": {"type": "STRING", "description": "Programming language"}}, "required": ["description"]}},
+    {"name": "game_updater", "description": "Steam/Epic: update, install, list games.", "parameters": {"type": "OBJECT", "properties": {"action": {"type": "STRING", "description": "update|install|list"}, "platform": {"type": "STRING", "description": "steam|epic|both"}, "game_name": {"type": "STRING", "description": "Game name"}}, "required": []}},
+    {"name": "flight_finder", "description": "Search Google Flights.", "parameters": {"type": "OBJECT", "properties": {"origin": {"type": "STRING", "description": "Departure city"}, "destination": {"type": "STRING", "description": "Arrival city"}, "date": {"type": "STRING", "description": "Date"}}, "required": ["origin", "destination", "date"]}},
+]
+
+AUREA_TOOLS = [
+    {"name": "bash", "description": "Run terminal command on any drive.", "parameters": {"type": "OBJECT", "properties": {"command": {"type": "STRING", "description": "Command to run"}, "workdir": {"type": "STRING", "description": "Working dir (optional)"}}, "required": ["command"]}},
+    {"name": "read", "description": "Read file or list directory (any path).", "parameters": {"type": "OBJECT", "properties": {"path": {"type": "STRING", "description": "File/dir path"}}, "required": ["path"]}},
+    {"name": "write", "description": "Create/overwrite file (any path).", "parameters": {"type": "OBJECT", "properties": {"path": {"type": "STRING", "description": "File path"}, "content": {"type": "STRING", "description": "File content"}}, "required": ["path", "content"]}},
+    {"name": "file_edit", "description": "Find-and-replace in file (any path).", "parameters": {"type": "OBJECT", "properties": {"path": {"type": "STRING", "description": "File path"}, "old_string": {"type": "STRING", "description": "Find"}, "new_string": {"type": "STRING", "description": "Replace with"}}, "required": ["path", "old_string", "new_string"]}},
+    {"name": "execute_python", "description": "Run Python code.", "parameters": {"type": "OBJECT", "properties": {"code": {"type": "STRING", "description": "Python code"}}, "required": ["code"]}},
+    {"name": "find_file", "description": "Find files anywhere on the machine by name. Use for music, videos, documents.", "parameters": {"type": "OBJECT", "properties": {"name": {"type": "STRING", "description": "Partial filename (Jefferson, .mp3)"}, "drive": {"type": "STRING", "description": "Drive (C:). Empty = all drives"}}, "required": ["name"]}},
+    {"name": "glob", "description": "Find files by glob pattern (any path).", "parameters": {"type": "OBJECT", "properties": {"pattern": {"type": "STRING", "description": "Pattern (*.py, *.mp3)"}, "path": {"type": "STRING", "description": "Base path (optional)"}}, "required": ["pattern"]}},
+    {"name": "search", "description": "Search text in files (regex).", "parameters": {"type": "OBJECT", "properties": {"pattern": {"type": "STRING", "description": "Text or regex"}, "path": {"type": "STRING", "description": "Dir (optional)"}}, "required": ["pattern"]}},
+    {"name": "open_app_aurea", "description": "Open program (searches Program Files, AppData, PATH).", "parameters": {"type": "OBJECT", "properties": {"app_name": {"type": "STRING", "description": "Program name"}}, "required": ["app_name"]}},
+    {"name": "close_app", "description": "Close a process.", "parameters": {"type": "OBJECT", "properties": {"process_name": {"type": "STRING", "description": "Process name (notepad.exe)"}}, "required": []}},
+    {"name": "web_search", "description": "Search the internet.", "parameters": {"type": "OBJECT", "properties": {"query": {"type": "STRING", "description": "Search query"}}, "required": ["query"]}},
+    {"name": "web_fetch", "description": "Fetch URL content.", "parameters": {"type": "OBJECT", "properties": {"url": {"type": "STRING", "description": "URL"}}, "required": ["url"]}},
+    {"name": "memory_write", "description": "Save to persistent memory.", "parameters": {"type": "OBJECT", "properties": {"namespace": {"type": "STRING", "description": "Category"}, "key": {"type": "STRING", "description": "Key"}, "content": {"type": "STRING", "description": "Value"}}, "required": ["namespace", "key", "content"]}},
+    {"name": "memory_read", "description": "Read from persistent memory.", "parameters": {"type": "OBJECT", "properties": {"namespace": {"type": "STRING", "description": "Category"}, "key": {"type": "STRING", "description": "Key"}}, "required": ["namespace", "key"]}},
+]
+
+ALL_COMBINED_TOOLS = MARKL_TOOLS + AUREA_TOOLS

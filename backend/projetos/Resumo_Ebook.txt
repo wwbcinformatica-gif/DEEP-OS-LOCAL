@@ -1,0 +1,17 @@
+Resumo do Ebook
+
+Temperatura (Brasília - 17 a 21/08/2026)
+Data	Mín	Máx	Condições
+Seg 17/08	16°C	29°C	Sol
+Ter 18/08	17°C	28°C	Sol
+Qua 19/08	18°C	27°C	Parcial nublado
+Qui 20/08	24°C	27°C	Chuva isolada
+Sex 21/08	19°C	30°C	Poucas nuvens
+
+Terremotos Principais (Semana)
+Colombia (10/08): Magnitude 7.4 - San José del Palmar, Chocó
+Peru (20/08): Magnitude 7.2 - Coracora, Ayacucho
+México (17/08): Magnitude 7.4 - Ciudad Hidalgo, Chiapas
+Total de terremotos na semana: ~1.144 eventos registrados
+
+O ebook inclui gráficos, estatísticas detalhadas e análises de fontes oficiais (INMET, USGS, SGC, IGP).

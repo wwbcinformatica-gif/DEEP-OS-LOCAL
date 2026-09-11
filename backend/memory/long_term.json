@@ -1,0 +1,33 @@
+{
+  "identity": {},
+  "preferences": {},
+  "projects": {},
+  "relationships": {},
+  "wishes": {},
+  "notes": {},
+  "monitors": {
+    "precos_de_passagens_para_paris": {
+      "topic": "precos de passagens para Paris",
+      "added": "2026-08-16",
+      "last_check": "2026-09-04",
+      "last_hash": "77f79661ac3b"
+    }
+  },
+  "sessions": [
+    {
+      "date": "2026-09-04",
+      "summary": "O usuário perguntou se a lista de ferramentas e recursos apresentada poderia ser exibida no chat central.",
+      "language": "portugues"
+    },
+    {
+      "date": "2026-09-04",
+      "summary": "O usuário apenas recebeu a saudação inicial e a oferta de ajuda do assistente Charon, sem ainda ter interagido ou apresentado sua solicitação.",
+      "language": "portugues"
+    },
+    {
+      "date": "2026-09-04",
+      "summary": "O usuário foi recebido pelo assistente Charon, que se colocou à disposição para ajudar com diversas tarefas de sistema, código e arquivos, sem que o usuário tenha feito uma solicitação ainda.",
+      "language": "portugues"
+    }
+  ]
+}

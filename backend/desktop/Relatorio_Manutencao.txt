@@ -1,0 +1,23 @@
+Relatório de Manutenção: PC Gamer
+
+Cliente: Já havia feito limpeza conosco ano passado devido a desligamentos em jogos pesados.
+Configuração: PC Gamer Pichau Preto, AMD Ryzen 7 5700X 8-Core 3.40GHz, 16GB de memória, Placa de Vídeo NVIDIA GEFORCE RTX 4060 8GB.
+Sintoma Inicial: PC liga, mas não dá imagem.
+Histórico do Cliente: O cliente abriu o PC e manuseou as memórias e a bateria. Realizou limpeza nos slots e mexeu no XMP da BIOS.
+
+Procedimentos Técnicos:
+- Teste inicial na loja: O PC ligava com intermitência, mas sem imagem.
+- Realizada desmontagem completa, desoxidação e limpeza geral.
+- Limpeza parcial na placa de vídeo, limpeza no gabinete, organização do cabeamento e lubrificação dos coolers.
+- Teste pós-limpeza: O equipamento não ligou.
+- Foi efetuada uma lavagem química na placa, após a qual a placa de vídeo apresentou vídeo novamente.
+- A manutenção foi necessária devido ao longo período sem cuidados, visando prevenir dúvidas sobre mau funcionamento, pequenos curtos e peças mal encaixadas que podem ter sido movidas pelo cliente.
+- Verificado que o cabo SATA estava parcialmente partido.
+
+Observações Importantes:
+- Cuidado ao encaixar e desencaixar a placa de vídeo para evitar danos à placa mãe.
+- A remoção de etiquetas ou lacres resultará na perda total da garantia.
+- Garantia de 3 meses por defeito de fábrica em peças novas adquiridas na loja.
+- Aparelhos com longo tempo sem manutenção podem apresentar problemas intermitentes.
+- Backups e arquivos são de responsabilidade do cliente.
+- Não cobrimos peças de terceiros, mau uso, curtos circuitos, descargas elétricas ou oscilação de energia.

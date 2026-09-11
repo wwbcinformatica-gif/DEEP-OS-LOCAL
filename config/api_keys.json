@@ -1,0 +1,9 @@
+{
+  "gemini_api_key": "AIzaSyBDdwUaKc-8TnapyXbL5CJkJ6PtFe2pB0A",
+  "os_system": "windows",
+  "assistant_name": "JARVIS",
+  "user_name": "Sir",
+  "brief_enabled": true,
+  "morning_brief_enabled": true,
+  "voice_preset": "charon"
+}

@@ -1,0 +1,75 @@
+agent:
+  image_input_mode: image
+  max_tool_steps: 100
+  max_turns: 40
+  personality: opencode
+  system_prompt: 'Responda Sempre em Portugues
+
+    '
+  toolset: agent
+agent_models:
+  architect: qwen3:14b
+  coder: qwen2.5-coder:14b
+  debugger: qwen2.5-coder:14b
+  jarvis: qwen2.5-coder:14b
+  planner: qwen3.5:9b
+display:
+  accent_theme: azul-claro
+  compact: true
+  language: pt-BR
+  show_reasoning: true
+  show_tool_calls: true
+  streaming: true
+identity:
+  assistant_name: Charon
+  custom_color: ''
+  user_name: Wilson
+  voice: Charon
+security:
+  sandbox_enabled: false
+server:
+  hostname: 127.0.0.1
+  port: 8000
+spiral_memory:
+  enabled: true
+  interval: 6
+  keeper_model: qwen2.5-coder:7b
+  keeper_provider: ollama
+terminal:
+  allowed_commands:
+  - ls
+  - dir
+  - cat
+  - type
+  - echo
+  - pwd
+  - cd
+  - mkdir
+  - copy
+  - move
+  - del
+  - git
+  - npm
+  - node
+  - python
+  - pip
+  - curl
+  - find
+  - grep
+  - rg
+  - ollama
+  backend: powershell
+  cwd: .
+  timeout: 600
+voice:
+  charon_toolset: full
+watcher:
+  ignore:
+  - node_modules/**
+  - dist/**
+  - .git/**
+workspace:
+  name: DEEP-OS-LOCAL
+workspaces:
+- last_opened: ''
+  name: DEEP-OS-LOCAL

@@ -1,0 +1,31 @@
+# Dependências
+node_modules/
+backend/venv/
+venv/
+
+# Build e artefatos gerados
+dist/
+build/
+*.min.js
+*.min.css
+
+# Logs
+logs/
+*.log
+
+# Cache
+.ruff_cache/
+__pycache__/
+.pytest_cache/
+
+# Modelos e dados pesados
+*.gguf
+data/
+Backups/
+
+# Outros
+*.rar
+*.zip
+
+# Subprojetos com configurações próprias
+0-Projetos/

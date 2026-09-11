@@ -1,0 +1,30 @@
+# Normalizacao de fim de linha por tipo de arquivo.
+#
+# CRITICO para os scripts .sh: se o Git converter para CRLF no checkout, o
+# bash no VPS quebra com "$'\r': command not found". Scripts shell exigem LF.
+#
+# O restante do repo pode usar o padrao do sistema (o Git normaliza para LF
+# no repositorio e converte no checkout conforme core.autocrlf).
+
+# Shell scripts DEVEM ter LF sempre
+*.sh text eol=lf
+
+# Python e Markdown tambem se beneficiam de LF estavel
+*.py text eol=lf
+*.md text eol=lf
+
+# No Windows, estes ficam com CRLF (bat/cmd exigem)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binarios: nunca tocar
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.gguf binary
+*.db binary
+*.sqlite binary

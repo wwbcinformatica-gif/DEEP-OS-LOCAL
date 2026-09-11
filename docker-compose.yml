@@ -1,0 +1,26 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - '8000:8000'
+    env_file:
+      - ./backend/.env
+    volumes:
+      - ./data:/app/data
+      - ./backend/config.yaml:/app/config.yaml
+      - ./.opencode:/app/.opencode
+    environment:
+      - WBC_CONFIG=/app/config.yaml
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - '5173:80'
+    depends_on:
+      - backend
+    restart: unless-stopped

@@ -1,0 +1,46 @@
+--- FERRAMENTAS DO PROJETO DEEP-AUREA (Total: 33) ---
+
+### 1. Sistema
+- open_app: Abre aplicativos.
+- open_program: Abre programas (mais robusto).
+- close_program: Fecha processos.
+- system_status: Métricas do sistema (CPU, RAM, etc).
+- computer_settings: Controla configurações (volume, brilho, WiFi).
+- computer_control: Controle direto (digitar, clicar, atalhos).
+
+### 2. Web
+- web_search: Busca na web.
+- web_fetch: Obtém conteúdo de URL.
+- browser_control: Controla navegadores.
+
+### 3. Arquivos
+- file_controller: Gerencia arquivos e pastas (criar, deletar, mover, copiar, etc).
+- read_file: Lê conteúdo de arquivo/pasta.
+- write_file: Cria/sobrescreve arquivo.
+- file_edit: Edita arquivo (find-replace).
+- find_file: Busca arquivos por nome.
+- glob_search: Busca arquivos por padrão glob.
+- file_processor: Processa arquivos (analisar, extrair texto, etc).
+
+### 4. Código
+- code_helper: Escreve, edita, explica, executa código.
+- dev_agent: Cria projetos multi-arquivo.
+- execute_python: Executa código Python.
+- bash: Executa comandos no terminal.
+- text_search: Busca texto em arquivos (regex).
+
+### 5. Mídia
+- youtube_video: Controla YouTube.
+- screen_process: Captura e analisa tela/webcam.
+- close_camera: Fecha a câmera.
+
+### 6. Outros
+- send_message: Envia mensagens.
+- reminder: Agenda lembretes.
+- desktop_control: Controla área de trabalho.
+- - game_updater: Gerencia jogos (Steam/Epic).
+- flight_finder: Busca passagens aéreas.
+- manage_monitor: Monitoramento em background.
+- memory_save: Salva na memória de longo prazo.
+- memory_recall: Lê da memória de longo prazo.
+- weather_report: Relatório do tempo.

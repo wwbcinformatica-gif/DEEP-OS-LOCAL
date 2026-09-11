@@ -1,0 +1,24 @@
+{
+  "full_access": true,
+  "categories": {
+    "desktop_control": "allow",
+    "send_message": "allow",
+    "screen_process": "allow",
+    "web_search": "allow",
+    "computer_control": "allow",
+    "system_status": "allow",
+    "shutdown_jarvis": "allow",
+    "file_controller": "allow",
+    "dev_agent": "allow",
+    "file_processor": "allow",
+    "open_app": "allow",
+    "youtube_video": "allow",
+    "computer_settings": "allow",
+    "weather_report": "allow",
+    "manage_monitor": "allow",
+    "code_helper": "allow",
+    "flight_finder": "allow",
+    "game_updater": "allow",
+    "reminder": "allow"
+  }
+}

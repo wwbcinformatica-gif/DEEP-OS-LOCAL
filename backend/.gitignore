@@ -1,0 +1,29 @@
+# Ambiente
+.env
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Dados
+data/
+*.db
+*.sqlite
+
+# Modelos
+*.gguf
+*.bin
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+Thumbs.db
+.DS_Store

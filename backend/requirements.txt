@@ -1,0 +1,84 @@
+# ─── Core ───────────────────────────────────────────────────────
+fastapi==0.115.0
+uvicorn==0.30.5
+pydantic>=2.13.0
+python-dotenv==1.0.1
+pyyaml==6.0.2
+
+# ─── Fuso horario ───────────────────────────────────────────────
+# O `ZoneInfo` do Python precisa de um banco de fusos. No Linux ele vem do
+# sistema (/usr/share/zoneinfo), mas no WINDOWS ele so existe via este pacote.
+# Sem `tzdata`, ZoneInfo('America/Sao_Paulo') levanta ZoneInfoNotFoundError e
+# o fuso cai em UTC — deixando lembretes 3h errados no Brasil.
+tzdata>=2024.1
+
+# ─── Auth / JWT ──────────────────────────────────────────────────
+PyJWT>=2.8.0
+bcrypt>=4.0.0
+
+# ─── HTTP / API ─────────────────────────────────────────────────
+httpx>=0.28.1
+openai>=3.3.0
+requests>=2.31.0
+
+# ─── Rate Limiting ──────────────────────────────────────────────
+slowapi==0.1.9
+
+# ─── TTS (Text-to-Speech) ──────────────────────────────────────
+edge-tts>=7.2.0
+
+# ─── STT (Speech-to-Text) ──────────────────────────────────────
+SpeechRecognition==3.17.0
+pydub==0.25.1
+
+# ─── Gemini Live API ───────────────────────────────────────────
+google-genai>=2.19.0
+cryptography>=44.0.0
+
+# ─── Voice / Audio ─────────────────────────────────────────────
+sounddevice>=0.4.6
+numpy>=1.24.0
+
+# ─── Computer Control (Mark-L) ─────────────────────────────────
+pyautogui>=0.9.54
+pyperclip>=1.8.2
+pygetwindow>=0.0.9
+opencv-python-headless>=4.8.0
+mss>=9.0.1
+psutil>=5.9.5
+send2trash>=1.8.2
+
+# ─── Web / Search ──────────────────────────────────────────────
+beautifulsoup4>=4.12.0
+ddgs>=9.15.0
+duckduckgo-search>=4.1.0
+youtube-transcript-api>=0.6.1
+
+# ─── Browser Automation ────────────────────────────────────────
+playwright>=1.40.0
+cdp-use>=1.4.5
+websockets>=15.0
+pillow>=10.0.0
+
+# ─── Windows-specific ──────────────────────────────────────────
+comtypes; sys_platform == "win32"
+pycaw; sys_platform == "win32"
+pywin32; sys_platform == "win32"
+pywinauto; sys_platform == "win32"
+
+# ─── Utilities ─────────────────────────────────────────────────
+python-pptx>=0.6.21
+qrcode[pil]>=7.4
+pillow>=10.0.0
+python-multipart>=0.0.6
+
+# ─── RAG / Vector Memory (optional) ────────────────────────────
+# langchain-community>=0.2.0
+# langchain-core>=0.2.0
+# langchain-groq>=0.1.0
+# faiss-cpu>=1.7.0
+# sentence-transformers>=2.0.0
+
+# ─── Dev / Test ────────────────────────────────────────────────
+# pytest>=7.0.0
+# ruff>=0.4.0

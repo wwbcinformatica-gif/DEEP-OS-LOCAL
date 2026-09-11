@@ -1,0 +1,38 @@
+{
+  "name": "deep-os-local",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DEEP-OS-LOCAL — Sistema Operacional de Agentes de IA (Local)",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "cd backend && uvicorn main:app --host 127.0.0.1 --port 8001 --reload",
+    "dev:frontend": "cd frontend && npm run dev",
+    "dev:saas": "concurrently \"npm run dev:backend\" \"npm run dev:frontend:saas\"",
+    "dev:frontend:saas": "cd frontend && npm run dev:saas",
+    "build": "cd frontend && npm run build",
+    "build:saas": "cd frontend && npm run build:saas",
+    "start": "cd backend && uvicorn main:app --host 0.0.0.0 --port 8000",
+    "start:saas": "cd backend && SaaS_MODE=true uvicorn main:app --host 0.0.0.0 --port 8000",
+    "test": "concurrently \"npm run test:backend\" \"npm run test:frontend\"",
+    "test:backend": "cd backend && pytest",
+    "test:frontend": "cd frontend && npx vitest run",
+    "lint": "concurrently \"npm run lint:backend\" \"npm run lint:frontend\"",
+    "lint:backend": "cd backend && ruff check .",
+    "lint:frontend": "cd frontend && npx eslint src/",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "typecheck": "cd frontend && npx tsc --noEmit",
+    "clean": "cd frontend && rm -rf dist node_modules && cd ../backend && rm -rf __pycache__ .ruff_cache",
+    "docker:up": "docker-compose up -d",
+    "docker:down": "docker-compose down",
+    "docker:build": "docker-compose build",
+    "docker:up:saas": "docker-compose -f docker-compose.saas.yml up -d",
+    "docker:down:saas": "docker-compose -f docker-compose.saas.yml down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0",
+    "prettier": "^3.5.3",
+    "prettier-plugin-svelte": "^4.1.1"
+  }
+}

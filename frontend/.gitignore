@@ -1,0 +1,17 @@
+node_modules/
+dist/
+.vite/
+
+# Ambiente
+.env
+.env.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Sistema
+Thumbs.db
+.DS_Store

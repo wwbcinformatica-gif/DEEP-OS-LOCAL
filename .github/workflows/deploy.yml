@@ -1,0 +1,91 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches: [master]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: root
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd /root/DEEP-OS
+            
+            echo "=== Iniciando deploy ==="
+            
+            # 1. Atualizar codigo
+            echo "1. Atualizando codigo..."
+            git checkout -- . 2>/dev/null || true
+            git pull origin master
+            
+            # 2. Instalar dependencias Python
+            echo "2. Instalando dependencias Python..."
+            cd backend
+            source /root/DEEP-OS/venv/bin/activate 2>/dev/null || true
+            pip install -r requirements.txt --quiet 2>&1 | tail -5
+            cd ..
+            
+            # 3. Build frontend
+            echo "3. Buildando frontend..."
+            cd frontend
+            npm install --quiet 2>&1 | tail -3
+            npm run build:saas 2>&1 | tail -5
+            cd ..
+            
+            # 4. Copiar build para nginx
+            echo "4. Copiando build para nginx..."
+            if [ -d "frontend/dist-saas" ]; then
+              rm -rf /var/www/deep-os/frontend/dist-saas/*
+              cp -r frontend/dist-saas/* /var/www/deep-os/frontend/dist-saas/
+              echo "   Build copiado"
+            else
+              echo "   ERRO: frontend/dist-saas nao encontrado"
+              exit 1
+            fi
+            
+            # 5. Testar nginx
+            echo "5. Testando configuracao nginx..."
+            if nginx -t 2>&1 | grep -q "successful"; then
+              echo "   Configuracao nginx OK"
+            else
+              echo "   ERRO na configuracao nginx"
+              nginx -t
+              exit 1
+            fi
+            
+            # 6. Reiniciar backend
+            echo "6. Reiniciando backend..."
+            systemctl restart deep-os-backend
+            sleep 2
+            
+            if systemctl is-active --quiet deep-os-backend; then
+              echo "   Backend reiniciado com sucesso"
+            else
+              echo "   ERRO: Backend nao subiu"
+              exit 1
+            fi
+            
+            # 7. Recarregar nginx
+            echo "7. Recarregando nginx..."
+            systemctl reload nginx
+            echo "   Nginx recarregado"
+            
+            # 8. Verificar status
+            echo "8. Verificando servicos..."
+            sleep 2
+            
+            if systemctl is-active --quiet deep-os-backend && systemctl is-active --quiet nginx; then
+              echo "=== Deploy concluido com sucesso! ==="
+              echo "Frontend: https://deep-os.tech"
+              echo "Backend:  http://127.0.0.1:8001"
+            else
+              echo "=== Deploy com problemas ==="
+              systemctl status deep-os-backend --no-pager -l 2>&1 | head -20
+              exit 1
+            fi
