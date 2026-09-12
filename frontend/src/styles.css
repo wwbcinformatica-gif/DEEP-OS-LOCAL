@@ -239,6 +239,14 @@ a:focus-visible {
   100% { transform: translateX(200%); }
 }
 
+/* Passo do plano em execucao: gira o meio-circulo.
+   Movimento e o sinal mais rapido de "esta andando" — texto parado fazia o
+   painel parecer travado, que foi a queixa do usuario. */
+@keyframes giroPasso {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
 @keyframes bounce-dot {
   0%, 80%, 100% { transform: translateY(0); }
   40% { transform: translateY(-6px); }

@@ -312,7 +312,71 @@ executar `GET /api/config/api-keys` de verdade).
 
 ---
 
-### 9. Documentação
+### 9. Ferramentas: o modelo "anunciava e não fazia" + painel estilo VS Code
+
+**Queixa:** *"o modelo parece estar com dificuldade de utilizar as ferramentas…
+o modelo fala que vai fazer e fica ali no plano de execução e não faz"* — e o
+markup `<｜DSML｜og7d8j9uokjb…>` aparecia **cru** no chat.
+
+**Eram dois bugs somados** (de novo um escondendo o outro):
+
+**(a) O formato DSML era desconhecido.** Alguns modelos — sobretudo **DeepSeek
+V3.2/V4 via OpenRouter** — não devolvem `tool_calls` estruturado: escrevem o
+markup nativo **dentro do texto**. O DEEP-OS só conhecia XML do Gemini, JSON e
+`bash("…")`. A palavra `DSML` **não existia em nenhum lugar do código** — foi a
+pista que fechou o diagnóstico.
+
+Detalhe decisivo: o delimitador é a barra vertical de **largura total**
+(`｜`, U+FF5C), **não** o `|` ASCII (U+007C). Comparar com o caractere errado faz
+o parser nunca casar. É problema conhecido e documentado do próprio DeepSeek
+([issue](https://github.com/NousResearch/hermes-agent/issues/15453),
+[PR](https://github.com/NousResearch/hermes-agent/pull/98764),
+[discussão](https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/discussions/209)).
+
+**(b) Faltava o fallback no caminho das TAREFAS.** Assimetria:
+
+| Caminho | Fallback de texto? |
+|---|---|
+| `stream_chat_with_tools` (chat) | ✅ tinha |
+| **`complete_chat_with_tools`** (tarefas) | ❌ **não tinha** |
+
+Sem ele, o texto era tratado como **resposta final** e o loop **terminava** — por
+isso "anuncia e não faz". As tarefas usam justamente o não-streaming.
+
+**Correção:**
+- `extrair_dsml()` — containers `tool_calls` (V4) e `function_calls` (V3.2),
+  parâmetros como tag XML **ou** JSON cru, invoke sem container, aspas simples,
+  barra ASCII ou larga, e **várias chamadas** na mesma resposta;
+- `extrair_tools_do_texto()` usado pelos **dois** caminhos (fim da assimetria);
+- `limpar_markup_dsml()` — o markup some do texto exibido, inclusive tags
+  malformadas; texto sem markup volta intacto;
+- tipagem que **não corrompe** `ls -la` (só converte o que parece JSON);
+- o fallback do não-streaming só roda `if tools:` — evita virar chamada de
+  ferramenta uma conversa que apenas cite JSON.
+
+**Painel de execução refeito no estilo VS Code.** Antes era lista plana e o
+frontend **ignorava** os eventos `task_checklist`, `task_progress` e `thinking`
+que o backend já enviava — o "plano" era só texto do modelo.
+
+| Antes | Agora |
+|-------|-------|
+| lista plana | **árvore** com conectores (`├─`, `└─`) |
+| sem tempo | **duração** por ferramenta (`1.2s`, `840ms`) |
+| plano só como texto | **plano real** do backend, com estado por passo |
+| parecia travado | **ícone girando** no passo em execução |
+| sem visão do todo | **barra de progresso** + contador `2/4` |
+
+Barra âmbar enquanto executa, **verde** a 100%, **vermelha** se um passo falhar.
+
+**Teste:** `tests-manual/test_dsml_tools.py` (novo) — 35 verificações offline,
+incluindo uma checagem **estrutural** de que os dois caminhos usam o mesmo
+extrator (foi essa assimetria que causou o bug).
+
+**Documentação:** `docs/FERRAMENTAS.md` (novo).
+
+---
+
+### 10. Documentação
 
 - **Novo:** [`docs/MODELOS.md`](docs/MODELOS.md) — por que davam 404, as
   armadilhas de teste, o estado real de cada provedor, as 8 regras para não
@@ -324,19 +388,21 @@ executar `GET /api/config/api-keys` de verdade).
 
 ---
 
-### 10. Commits desta sessão
+### 11. Commits desta sessão
 
 | Commit | Assunto |
 |--------|---------|
 | `436673e` | `fix(chaves)`: placeholder `***saved***` não sobrescreve mais a chave real |
 | `b09cdec` | `fix(modelos)`: listas provadas, seletor de provedor e IDs extintos |
-| (este) | `fix(charon)+feat(provedores)`: barge-in, saudação curta, campos de chave e provedores personalizados |
+| `48ef87e` | `fix(charon)+feat(provedores)`: barge-in, saudação curta, campos de chave e provedores personalizados |
+| `a6db871` | `fix(provedores)`: chave de provedor novo era descartada ao salvar e ao ler |
+| (este) | `fix(ferramentas)`: parser DSML, fallback no caminho das tarefas e painel estilo VS Code |
 
 ---
 
-### 11. Verificações executadas
+### 12. Verificações executadas
 
-- `tests-manual/run_all.py` → **16/16 arquivos passando**
+- `tests-manual/run_all.py` → **17/17 arquivos passando**
 - `tsc --noEmit` → **0 erros novos** nos arquivos alterados (14 erros pré-existentes em outros)
 - `import main` → OK, **250 rotas**
 - Chaves reais do usuário **intactas** após os testes (9 provedores no `.env`)
@@ -348,7 +414,7 @@ executar `GET /api/config/api-keys` de verdade).
 
 ---
 
-### 12. ✅ Confirmado pelo usuário em produção (2026-09-12)
+### 13. ✅ Confirmado pelo usuário em produção (2026-09-12)
 
 > *"perfeito salvou a chave testou ok funcionou no chat jarvis"*
 
@@ -360,11 +426,11 @@ existia**, o placeholder `***saved***` sobrescrevia a chave real, o erro era
 engolido por `.catch(() => {})` e na VPS o `401` do middleware ficava invisível.
 
 **Ainda não testado com voz real** (precisa de microfone): a interrupção do
-Charon e a saudação curta. Ver a seção 12 da sessão 49 mais abaixo para o roteiro.
+Charon e a saudação curta. Ver a seção 14 mais abaixo para o roteiro.
 
 ---
 
-### 11. ⚠️ Não testado (depende de você, precisa de voz)
+### 14. ⚠️ Não testado (depende de você)
 
 O barge-in e a saudação usam o Gemini Live, então **não dá para verificar sem
 microfone**. Depois do deploy, confira na tela do Charon:

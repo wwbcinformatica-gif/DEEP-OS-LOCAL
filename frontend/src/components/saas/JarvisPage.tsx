@@ -50,6 +50,14 @@ interface ToolCall {
   status: 'running' | 'done' | 'error';
 }
 
+/**
+ * Uma linha do painel de execucao (estilo VS Code).
+ *
+ * `depth` existe para desenhar a ARVORE: um evento de ferramenta fica no nivel
+ * 0 e os detalhes (parametros, resultado) ficam no nivel 1, com linha de
+ * conexao — como a arvore de arquivos do VS Code. Antes tudo era uma lista
+ * plana, sem hierarquia e sem duracao, o que fazia o plano parecer "travado".
+ */
 interface ProcessEntry {
   id: string;
   type: 'thinking' | 'tool_start' | 'tool_end' | 'tool_error' | 'info';
@@ -57,6 +65,26 @@ interface ProcessEntry {
   detail?: string;
   timestamp: Date;
   status?: 'running' | 'done' | 'error';
+  /** Quanto a ferramenta levou (calculado entre tool_start e tool_end). */
+  durationMs?: number;
+  /** Nivel na arvore: 0 = evento principal, 1 = detalhe. */
+  depth?: number;
+  /** Detalhe mostrado ou recolhido (o usuario clica para abrir). */
+  expandido?: boolean;
+}
+
+/**
+ * Um passo do PLANO da tarefa.
+ *
+ * O backend emite `task_checklist` (lista completa) e `task_progress` (mudanca
+ * de status de um passo). O frontend NAO tratava esses eventos — o plano que o
+ * usuario via era apenas texto que o modelo escreveu. Agora a lista vem do
+ * backend e cada passo tem estado proprio.
+ */
+interface PassoPlano {
+  title: string;
+  status: 'pending' | 'running' | 'done' | 'error';
+  error?: string;
 }
 
 interface Message {
@@ -270,6 +298,13 @@ const JarvisPage: React.FC = () => {
   // Provedor cuja chave esta sendo testada agora (mostra "..." no botao).
   const [testando, setTestando] = useState<string | null>(null);
 
+  // ── Plano de execucao (estilo VS Code) ───────────────────────────────────
+  // Preenchido pelos eventos `task_checklist` / `task_progress` do backend.
+  const [passosPlano, setPassosPlano] = useState<PassoPlano[]>([]);
+  // Inicio de cada ferramenta em execucao, para calcular a duracao no fim.
+  // Usa ref (nao estado) porque e dado de controle, nao de renderizacao.
+  const iniciosFerramentaRef = useRef<Record<string, number>>({});
+
   // ── Provedores: comuns do backend + personalizados do usuario ────────────
   //
   // POR QUE VEM DO BACKEND
@@ -468,10 +503,24 @@ const JarvisPage: React.FC = () => {
     }
   }, []);
 
-  const addProcess = (type: ProcessEntry['type'], label: string, detail?: string, status?: ProcessEntry['status']) => {
+  /**
+   * Adiciona uma linha ao painel de execucao.
+   *
+   * `depth` desenha a arvore (0 = evento, 1 = detalhe aninhado) e `durationMs`
+   * mostra quanto a ferramenta levou — duas coisas que o VS Code faz e que
+   * faziam falta para o usuario entender se o plano esta andando.
+   */
+  const addProcess = (
+    type: ProcessEntry['type'],
+    label: string,
+    detail?: string,
+    status?: ProcessEntry['status'],
+    depth: number = 0,
+    durationMs?: number,
+  ) => {
     setProcessLog(prev => [...prev, {
       id: String(Date.now()) + Math.random().toString(36).slice(2, 6),
-      type, label, detail, timestamp: new Date(), status,
+      type, label, detail, timestamp: new Date(), status, depth, durationMs,
     }]);
   };
 
@@ -641,6 +690,12 @@ const JarvisPage: React.FC = () => {
     setInput('');
     setIsTyping(true);
 
+    // Zera o plano e os cronometros da execucao anterior.
+    // Sem isto, os passos do pedido anterior ficariam misturados com os novos e
+    // a duracao das ferramentas sairia errada.
+    setPassosPlano([]);
+    iniciosFerramentaRef.current = {};
+
     addProcess('thinking', 'Analisando pergunta...', `"${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`);
 
     const jarvisMsg: Message = {
@@ -717,11 +772,43 @@ const JarvisPage: React.FC = () => {
               } else if (event.type === 'tool_start') {
                 const toolName = event.tool || event.tool_name || 'desconhecida';
                 const params = typeof event.params === 'string' ? event.params : JSON.stringify(event.params || {}, null, 0);
-                addProcess('tool_start', `Ferramenta: ${toolName}`, params.slice(0, 150), 'running');
+                // Guarda o inicio para medir a duracao quando chegar o tool_end.
+                iniciosFerramentaRef.current[toolName] = Date.now();
+                addProcess('tool_start', `${toolName}`, params.slice(0, 300), 'running');
+                // Detalhe aninhado (arvore): os parametros ficam um nivel abaixo
+                if (params && params !== '{}') {
+                  addProcess('info', `${(event.step ?? '') ? `passo ${event.step}` : 'parametros'}`, params.slice(0, 600), undefined, 1);
+                }
               } else if (event.type === 'tool_end') {
                 const toolName = event.tool || event.tool_name || '';
                 const result = typeof event.result === 'string' ? event.result : JSON.stringify(event.result || {}, null, 0);
-                addProcess('tool_end', `Concluida: ${toolName}`, result.slice(0, 150), 'done');
+                const inicio = iniciosFerramentaRef.current[toolName];
+                const duracao = inicio ? Date.now() - inicio : undefined;
+                delete iniciosFerramentaRef.current[toolName];
+                addProcess('tool_end', `${toolName}`, result.slice(0, 600), 'done', 0, duracao);
+              } else if (event.type === 'thinking') {
+                // O backend manda "[Passo N/M] Executando: X" — mostra como
+                // andamento do plano, nao como ruido.
+                addProcess('thinking', event.content || 'Pensando...', undefined, 'running');
+              } else if (event.type === 'task_checklist') {
+                // Plano completo da tarefa. Era IGNORADO antes: o usuario via
+                // apenas o texto que o modelo escreveu, sem estado real.
+                setPassosPlano((event.steps || []).map((s: any) => ({
+                  title: s.title || s.step || String(s),
+                  status: s.status || 'pending',
+                  error: s.error,
+                })));
+              } else if (event.type === 'task_progress') {
+                // Mudanca de estado de UM passo.
+                setPassosPlano(prev => {
+                  const idx = event.step_index;
+                  if (typeof idx !== 'number' || idx < 0 || idx >= prev.length) return prev;
+                  const novo = [...prev];
+                  novo[idx] = { ...novo[idx], status: event.status || 'running', error: event.error };
+                  return novo;
+                });
+              } else if (event.type === 'tool_confirm') {
+                addProcess('tool_error', `Aguardando sua confirmacao: ${event.tool || ''}`, event.label || '', 'running');
               } else if (event.type === 'error') {
                 addProcess('tool_error', `Erro: ${event.message}`, undefined, 'error');
                 fullAnswer += `\n\nErro: ${event.message}`;
@@ -844,6 +931,44 @@ const JarvisPage: React.FC = () => {
   };
 
   const activeToolCount = processLog.filter(p => p.type === 'tool_start' && p.status === 'running').length;
+
+  // ── Progresso do plano (barra do topo, como a do VS Code) ────────────────
+  const passosFeitos = passosPlano.filter(p => p.status === 'done').length;
+  const passosComErro = passosPlano.filter(p => p.status === 'error').length;
+  const progresso = passosPlano.length
+    ? Math.round(((passosFeitos + passosComErro) / passosPlano.length) * 100)
+    : 0;
+
+  /** Icone de cada passo do plano, no vocabulario visual do VS Code. */
+  const iconePasso = (status: PassoPlano['status']) => {
+    if (status === 'done') return '\u2714';       // check
+    if (status === 'running') return '\u25D0';    // meio circulo (em andamento)
+    if (status === 'error') return '\u2716';      // X
+    return '\u25CB';                              // circulo vazio (pendente)
+  };
+  const corPasso = (status: PassoPlano['status']) => {
+    if (status === 'done') return '#10b981';
+    if (status === 'running') return '#f59e0b';
+    if (status === 'error') return '#ef4444';
+    return '#555';
+  };
+
+  /** Conectores da arvore de atividade (o que faz parecer uma arvore e nao lista). */
+  const conectorArvore = (entry: ProcessEntry, index: number) => {
+    const temProximo = index < processLog.length - 1;
+    if ((entry.depth ?? 0) > 0) return temProximo ? '\u251C\u2500' : '\u2514\u2500';
+    return '\u25CF';
+  };
+
+  /** Duracao legivel: 840ms / 2.4s / 1m03s */
+  const formatarDuracao = (ms?: number) => {
+    if (ms === undefined || ms === null) return '';
+    if (ms < 1000) return `${Math.round(ms)}ms`;
+    if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
+    const min = Math.floor(ms / 60000);
+    const seg = Math.round((ms % 60000) / 1000);
+    return `${min}m${String(seg).padStart(2, '0')}s`;
+  };
 
   // ── Lista unificada de provedores ────────────────────────────────────────
   //
@@ -1036,44 +1161,147 @@ const JarvisPage: React.FC = () => {
           <div style={{ width: 3, height: 40, borderRadius: 2, background: '#333' }} />
         </div>
 
+        {/* ── Painel de execucao (organizacao no estilo VS Code) ──────────────
+            Antes era uma lista PLANA de texto: cada evento virava um bloco
+            igual, sem hierarquia, sem duracao e sem o plano real. O usuario
+            descreveu como "o modelo fala que vai fazer e fica ali no plano".
+
+            Agora tem tres camadas, como o painel de tarefas do VS Code:
+              1. CABECALHO com contador de passos e barra de progresso geral;
+              2. PLANO — os passos que o BACKEND enviou (task_checklist /
+                 task_progress), cada um com estado proprio;
+              3. ATIVIDADE — a arvore cronologica: evento principal e, um nivel
+                 abaixo, parametros e resultado, com tempo de cada ferramenta. */}
         <div style={{ ...s.rightPanel, width: rightPanelWidth }}>
           <div style={s.rightHeader}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff' }}>{'\u2699\uFE0F'} Processos</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff', letterSpacing: 0.5 }}>
+              {'\u25B6'} EXECUCAO
+            </span>
             <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>
-              {activeToolCount > 0 ? <span style={{ color: '#f59e0b' }}>{activeToolCount} ativo{activeToolCount > 1 ? 's' : ''}</span> : 'Idle'}
+              {passosPlano.length > 0
+                ? `${passosFeitos}/${passosPlano.length} passos`
+                : (activeToolCount > 0 ? <span style={{ color: '#f59e0b' }}>{activeToolCount} ativa{activeToolCount > 1 ? 's' : ''}</span> : 'ocioso')}
             </span>
           </div>
+
+          {/* Barra de progresso geral — so aparece quando ha plano */}
+          {passosPlano.length > 0 && (
+            <div style={{ height: 3, background: '#1a1a1a', flexShrink: 0 }}>
+              <div style={{
+                height: '100%',
+                width: `${progresso}%`,
+                background: passosComErro > 0 ? '#ef4444' : progresso === 100 ? '#10b981' : '#f59e0b',
+                transition: 'width .3s ease, background .3s ease',
+              }} />
+            </div>
+          )}
+
           <div ref={processListRef} style={s.processList}>
-            {processLog.length === 0 ? (
-              <div style={s.emptyState}>Nenhum processo ainda. Envie uma mensagem para ver a atividade do modelo aqui.</div>
-            ) : processLog.map(entry => (
-              <div key={entry.id} style={{
-                ...s.processItem,
-                borderLeftColor: entry.type === 'tool_error' ? '#ef4444' : entry.type === 'tool_end' ? '#10b981' : entry.type === 'tool_start' ? '#f59e0b' : entry.type === 'thinking' ? '#b478ff' : '#444',
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                  <span style={{ fontSize: 10 }}>{processIcon(entry.type, entry.status)}</span>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: entry.type === 'tool_error' ? '#ef4444' : entry.type === 'tool_end' ? '#10b981' : entry.type === 'tool_start' ? '#f59e0b' : entry.type === 'thinking' ? '#b478ff' : '#888' }}>
-                    {entry.label}
-                  </span>
-                  <span style={{ fontSize: 8, color: '#555', marginLeft: 'auto' }}>{formatProcessTime(entry.timestamp)}</span>
-                </div>
-                {entry.detail && (
-                  <div style={{ fontSize: 9, color: '#777', lineHeight: 1.3, fontFamily: "'Cascadia Code', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                    {entry.detail}
+            {/* ── PLANO ─────────────────────────────────────────────────── */}
+            {passosPlano.length > 0 && (
+              <div style={{ marginBottom: 10 }}>
+                <div style={s.painelSecaoTitulo}>PLANO</div>
+                {passosPlano.map((passo, i) => (
+                  <div key={i} style={{
+                    display: 'flex', alignItems: 'flex-start', gap: 6,
+                    padding: '2px 0 2px 2px',
+                    opacity: passo.status === 'pending' ? 0.5 : 1,
+                  }}>
+                    <span style={{
+                      color: corPasso(passo.status), fontSize: 10, width: 12, flexShrink: 0,
+                      // Gira o meio-circulo enquanto executa: da a sensacao de
+                      // andamento (o texto parado parecia travado).
+                      display: 'inline-block',
+                      animation: passo.status === 'running' ? 'giroPasso 1.4s linear infinite' : undefined,
+                    }}>{iconePasso(passo.status)}</span>
+                    <span style={{ fontSize: 9, color: '#444', width: 14, flexShrink: 0, textAlign: 'right' }}>{i + 1}</span>
+                    <span style={{
+                      fontSize: 10,
+                      color: passo.status === 'done' ? '#9aa' : passo.status === 'error' ? '#f88' : '#ccc',
+                      textDecoration: passo.status === 'done' ? 'none' : 'none',
+                      lineHeight: 1.35,
+                      wordBreak: 'break-word',
+                    }}>
+                      {passo.title}
+                      {passo.error && <span style={{ color: '#f88' }}> — {passo.error}</span>}
+                    </span>
                   </div>
-                )}
-                {entry.status === 'running' && (
-                  <div style={{ marginTop: 3, height: 2, background: '#222', borderRadius: 1, overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: '60%', background: entry.type === 'tool_start' ? '#f59e0b' : '#b478ff', animation: 'processBar 1.5s ease-in-out infinite' }} />
-                  </div>
-                )}
+                ))}
               </div>
-            ))}
+            )}
+
+            {/* ── ATIVIDADE (arvore) ────────────────────────────────────── */}
+            <div style={s.painelSecaoTitulo}>ATIVIDADE</div>
+            {processLog.length === 0 ? (
+              <div style={s.emptyState}>Envie uma mensagem para ver o plano e a execucao aqui.</div>
+            ) : processLog.map((entry, index) => {
+              const nivel = entry.depth ?? 0;
+              const cor = entry.type === 'tool_error' ? '#ef4444'
+                : entry.type === 'tool_end' ? '#10b981'
+                : entry.type === 'tool_start' ? '#f59e0b'
+                : entry.type === 'thinking' ? '#b478ff' : '#888';
+              const duracao = formatarDuracao(entry.durationMs);
+              return (
+                <div key={entry.id} style={{
+                  display: 'flex', gap: 5,
+                  paddingLeft: nivel * 12,
+                  borderLeft: nivel > 0 ? '1px solid #222' : 'none',
+                  marginLeft: nivel > 0 ? 6 : 0,
+                  paddingTop: 1, paddingBottom: 1,
+                }}>
+                  {/* Conector da arvore */}
+                  <span style={{
+                    fontSize: 8, color: nivel > 0 ? '#333' : cor,
+                    width: 12, flexShrink: 0, lineHeight: '14px',
+                    fontFamily: 'monospace',
+                  }}>{conectorArvore(entry, index)}</span>
+
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                      {nivel === 0 && <span style={{ fontSize: 9 }}>{processIcon(entry.type, entry.status)}</span>}
+                      <span style={{
+                        fontSize: nivel > 0 ? 9 : 10,
+                        fontWeight: nivel > 0 ? 400 : 600,
+                        color: nivel > 0 ? '#666' : cor,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>{entry.label}</span>
+                      {duracao && (
+                        <span style={{ fontSize: 8, color: '#555', marginLeft: 'auto', flexShrink: 0 }}>{duracao}</span>
+                      )}
+                      <span style={{ fontSize: 8, color: '#444', marginLeft: duracao ? 4 : 'auto', flexShrink: 0 }}>
+                        {formatProcessTime(entry.timestamp)}
+                      </span>
+                    </div>
+                    {entry.detail && (
+                      <div style={{
+                        fontSize: 9, color: '#6a6a6a', lineHeight: 1.4,
+                        fontFamily: "'Cascadia Code', 'Consolas', monospace",
+                        whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+                        maxHeight: 90, overflowY: 'auto',
+                        background: 'rgba(255,255,255,0.02)',
+                        borderLeft: '1px solid #222',
+                        paddingLeft: 6, marginTop: 2,
+                      }}>
+                        {entry.detail}
+                      </div>
+                    )}
+                    {entry.status === 'running' && (
+                      <div style={{ marginTop: 2, height: 2, background: '#1a1a1a', borderRadius: 1, overflow: 'hidden' }}>
+                        <div style={{ height: '100%', width: '60%', background: cor, animation: 'processBar 1.5s ease-in-out infinite' }} />
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
+
           <div style={s.rightFooter}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0' }} />
-            <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0' }}>{isTyping ? 'Ativo' : 'Pronto'}</span>
+            <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0' }}>{isTyping ? 'Executando' : 'Pronto'}</span>
+            {passosPlano.length > 0 && (
+              <span style={{ fontSize: 9, color: '#666', marginLeft: 6 }}>{progresso}%</span>
+            )}
             <span style={{ fontSize: 10, color: '#555', marginLeft: 'auto' }}>{processLog.length} eventos</span>
           </div>
         </div>
@@ -1499,6 +1727,13 @@ const s: Record<string, React.CSSProperties> = {
   rightHeader: { padding: '8px 12px', borderBottom: '1px solid #1a1a2e', flexShrink: 0, display: 'flex', alignItems: 'center' },
   processList: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 8, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 4 },
   processItem: { padding: '6px 8px', borderRadius: 4, background: 'rgba(255,255,255,0.02)', borderLeft: '2px solid #444', fontSize: 10 },
+  // Titulo de secao do painel: caixa alta, espacado e discreto — o mesmo
+  // vocabulario visual dos paineis do VS Code (EXPLORER, TIMELINE...).
+  painelSecaoTitulo: {
+    fontSize: 8, fontWeight: 700, color: '#5a5a5a',
+    letterSpacing: 1, textTransform: 'uppercase' as const,
+    marginBottom: 4, paddingBottom: 2, borderBottom: '1px solid #1e1e1e',
+  },
   rightFooter: { padding: '6px 12px', borderTop: '1px solid #1a1a2e', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modalContent: { background: '#0d0d1a', border: '1px solid #333', borderRadius: 12, width: '90%', maxWidth: 560, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },

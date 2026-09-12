@@ -7,7 +7,37 @@ Sistema operacional de agentes de IA com 3 modos de interacao:
 - **SaaS** — Multi-tenant para venda/locacao
 
 ## Status Atual (2026-09-12)
-**SESSAO 49 — CHAVES, MODELOS 404, CHARON (BARGE-IN) E PROVEDORES PERSONALIZADOS** ✓
+**SESSAO 49 — CHAVES, MODELOS, CHARON, PROVEDORES E EXECUCAO DE FERRAMENTAS** ✓
+
+### Ferramentas: o modelo "anunciava e nao fazia"
+**Documentacao: [`docs/FERRAMENTAS.md`](docs/FERRAMENTAS.md)**
+
+Queixa: *"o modelo fala que vai fazer e fica ali no plano de execucao e nao faz"*
+— com markup `<｜DSML｜...>` cru vazando no chat.
+
+**Dois bugs somados:**
+1. **DSML desconhecido** — DeepSeek V3.2/V4 (via OpenRouter) nao devolve
+   `tool_calls` estruturado: escreve o markup nativo DENTRO do texto. A palavra
+   `DSML` nao existia em nenhum lugar do codigo. O delimitador e U+FF5C (barra
+   vertical de LARGURA TOTAL), nao o `|` ASCII.
+2. **Faltava o fallback no caminho das tarefas** — `stream_chat_with_tools`
+   tinha extracao de tool-call em texto; `complete_chat_with_tools` **nao
+   tinha**. As tarefas usam o nao-streaming, entao o texto virava "resposta
+   final" e o loop TERMINAVA.
+
+**Corrigido:** `extrair_dsml()` (containers `tool_calls`/`function_calls`,
+parametros XML ou JSON, invoke solto, aspas simples, varias chamadas),
+`extrair_tools_do_texto()` usado pelos DOIS caminhos, `limpar_markup_dsml()` para
+o usuario nunca ver markup, e tipagem que nao corrompe `ls -la`.
+
+**Painel de execucao refeito no estilo VS Code:** cabecalho com contador e barra
+de progresso, secao PLANO com estado por passo (icone girando no que executa) e
+secao ATIVIDADE em arvore com conectores, duracao por ferramenta e detalhes
+aninhados. Antes era lista plana e o frontend **ignorava** `task_checklist`,
+`task_progress` e `thinking`.
+
+**Teste:** `tests-manual/test_dsml_tools.py` (35 verificacoes, offline), incluindo
+uma checagem estrutural de que os dois caminhos usam o mesmo extrator.
 
 ### Provedores: nao havia onde colar a chave + criar provedor novo
 **Documentacao: [`docs/PROVEDORES.md`](docs/PROVEDORES.md)**
@@ -1030,3 +1060,32 @@ lsof -i :443
     Antes de fechar uma feature que generaliza algo antes fixo, percorra o fluxo
     completo (salvar -> ler -> usar) procurando os pontos que ainda assumem a
     lista antiga.
+50. **Modelo que "anuncia e nao faz" = a chamada veio como TEXTO e nao foi
+    parseada.** Nao e lentidao nem bug do modelo: e formato nao reconhecido.
+    Sintoma classico no chat: markup cru tipo `<｜DSML｜...>` vazando. Ver
+    `docs/FERRAMENTAS.md`.
+51. **DSML (DeepSeek V3.2/V4): o delimitador e U+FF5C, nao o `|` ASCII.** E a
+    barra vertical de LARGURA TOTAL. Comparar com o caractere errado faz o
+    parser nunca casar — e o bug fica invisivel. Containers: `tool_calls` (V4) e
+    `function_calls` (V3.2); parametros como tag XML OU JSON cru.
+52. **Caminhos com e sem streaming PRECISAM ter a mesma capacidade.** O
+    `stream_chat_with_tools` tinha fallback de tool-call em texto e o
+    `complete_chat_with_tools` NAO tinha. Como as TAREFAS usam o nao-streaming,
+    um modelo que emite a chamada em texto tinha o texto tratado como resposta
+    final e o loop TERMINAVA. Ao mexer em um dos dois, verifique o outro — este
+    projeto tem varios pares assim (voz/texto, streaming/nao).
+53. **Ao extrair parametro de texto, NAO converta o que nao parece JSON.** Um
+    comando `ls -la` ou um caminho `downloads` virariam lixo se passassem por
+    `json.loads` sem criterio. Converta so quando a forma indicar JSON (chave,
+    colchete, aspas, numero ou booleano exato).
+54. **Markup de ferramenta nao pode aparecer para o usuario.** Alem de parsear,
+    LIMPE o texto exibido — inclusive tags malformadas, que o modelo emite. Ha
+    teste garantindo que texto sem markup volta intacto (nao corrompe resposta
+    normal).
+55. **Evento que o backend emite e o frontend ignora e trabalho perdido.** O
+    backend ja mandava `task_checklist`, `task_progress` e `thinking`; o
+    JarvisPage tratava so `token`/`tool_start`/`tool_end`/`error`/`done`. O
+    "plano" que o usuario via era apenas texto do modelo, sem estado real.
+56. **Movimento e o sinal mais rapido de "esta andando".** Um passo de plano com
+    icone girando e uma barra de progresso comunicam estado melhor do que
+    qualquer texto — a queixa era justamente "fica ali parado".

@@ -493,6 +493,198 @@ def _is_vision_model(model: str) -> bool:
     return bool(re.search(r'(vl|vision|gemma4)', name))
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DSML — DeepSeek V3.2/V4 emitindo chamada de ferramenta como TEXTO
+#
+# SINTOMA RELATADO PELO USUARIO
+# "o modelo fala que vai fazer e fica ali no plano de execucao e nao faz"
+# Ele via isto no chat:
+#     <｜DSML｜...>...</｜DSML｜...>
+#
+# O QUE ACONTECE
+# Alguns modelos (DeepSeek V3.2+/V4, sobretudo via OpenRouter) NAO devolvem
+# `tool_calls` estruturado: eles escrevem o markup nativo deles dentro do TEXTO.
+# O DEEP-OS nao conhecia esse formato, entao:
+#   1. nenhuma ferramenta era executada (o texto virava a "resposta final");
+#   2. o markup aparecia cru na conversa.
+#
+# E um problema conhecido e documentado do proprio DeepSeek:
+#   - https://github.com/NousResearch/hermes-agent/issues/15453
+#   - https://github.com/NousResearch/hermes-agent/pull/98764
+#   - https://huggingface.co/deepseek-ai/DeepSeek-V4-Pro/discussions/209
+#
+# FORMATO (conferido na implementacao de referencia do sglang e do vLLM)
+#
+#   <｜DSML｜tool_calls>                       <- V4; V3.2 usa <｜DSML｜function_calls>
+#     <｜DSML｜invoke name="bash">
+#       <｜DSML｜parameter name="command" string="true">ls -la</｜DSML｜parameter>
+#     </｜DSML｜invoke>
+#   </｜DSML｜tool_calls>
+#
+# Variante 2 — JSON direto dentro do invoke (sem tags de parametro):
+#
+#   <｜DSML｜tool_calls>
+#     <｜DSML｜invoke name="bash">
+#       {"command": "ls -la"}
+#     </｜DSML｜invoke>
+#   </｜DSML｜tool_calls>
+#
+# DETALHE QUE FAZ DIFERENCA: o delimitador usa a barra vertical de LARGURA TOTAL
+# (U+FF5C, "｜"), nao o "|" ASCII (U+007C). Comparar com o caractere errado faz o
+# parser nunca casar. Aceitamos os dois porque alguns servidores normalizam.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DSML_VERTICAIS = "[\uff5c|]"          # U+FF5C (correto) ou U+007C (normalizado)
+_DSML_ABRE = r"<\s*" + _DSML_VERTICAIS + r"\s*DSML\s*" + _DSML_VERTICAIS + r"\s*"
+_DSML_FECHA = r"</\s*" + _DSML_VERTICAIS + r"\s*DSML\s*" + _DSML_VERTICAIS + r"\s*"
+
+# Container: `tool_calls` (V4) ou `function_calls` (V3.2)
+_DSML_RE_BLOCO = re.compile(
+    _DSML_ABRE + r"(tool_calls|function_calls)\s*>(.*?)" + _DSML_FECHA + r"\1\s*>",
+    re.DOTALL,
+)
+# Invoke: aceita aspas simples ou duplas no nome da funcao
+_DSML_RE_INVOKE = re.compile(
+    _DSML_ABRE + r"invoke\s+name=[\"']([^\"']+)[\"']\s*>(.*?)" + _DSML_FECHA + r"invoke\s*>",
+    re.DOTALL,
+)
+# Parametro: o atributo string="true|false" e OPCIONAL (nem todo modelo o emite)
+_DSML_RE_PARAM = re.compile(
+    _DSML_ABRE + r"parameter\s+name=[\"']([^\"']+)[\"']"
+    r"(?:\s+string=[\"'](true|false)[\"'])?\s*>(.*?)" + _DSML_FECHA + r"parameter\s*>",
+    re.DOTALL,
+)
+
+
+def _dsml_converter_valor(bruto: str, tipo_string: str | None):
+    """
+    Converte o valor de um parametro para o tipo certo.
+
+    `string="true"` manda manter TEXTO (o caso mais comum: caminhos, comandos).
+    `string="false"` manda interpretar (numero, booleano, lista, objeto).
+    Sem o atributo, tentamos JSON apenas quando o valor PARECE JSON — senao um
+    caminho como `downloads` ou um comando como `ls -la` seria corrompido.
+    """
+    valor = (bruto or "").strip()
+
+    if tipo_string == "true":
+        return valor
+    if tipo_string == "false":
+        try:
+            return json.loads(valor)
+        except (json.JSONDecodeError, ValueError):
+            return valor
+
+    # Sem atributo: so tenta JSON se a forma indicar isso
+    parece_json = (
+        valor[:1] in "{[\""
+        or valor in ("true", "false", "null")
+        or re.fullmatch(r"-?\d+(\.\d+)?([eE][-+]?\d+)?", valor) is not None
+    )
+    if parece_json:
+        try:
+            return json.loads(valor)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return valor
+
+
+def extrair_dsml(texto: str) -> list:
+    """
+    Extrai chamadas de ferramenta do formato DSML. Devolve lista (pode ter
+    varias) no formato OpenAI, ou [] se nao houver nada.
+
+    Tolerancias propositais, todas observadas na pratica:
+      - container `tool_calls` OU `function_calls`;
+      - sem container nenhum (o modelo as vezes solta so o `<invoke>`);
+      - parametros como tags XML OU como JSON cru dentro do invoke;
+      - barra vertical larga (U+FF5C) ou ASCII.
+    """
+    if not texto or "DSML" not in texto:
+        return []
+
+    # Se houver container, trabalha so dentro dele. Se nao houver, procura
+    # invokes soltos no texto inteiro — melhor executar do que ignorar.
+    blocos = _DSML_RE_BLOCO.findall(texto)
+    corpo = "\n".join(b[1] for b in blocos) if blocos else texto
+
+    chamadas = []
+    for i, (nome, corpo_invoke) in enumerate(_DSML_RE_INVOKE.findall(corpo)):
+        nome = (nome or "").strip()
+        if not nome:
+            continue
+
+        params: dict = {}
+        achou_tag_param = False
+        for pnome, pstring, pvalor in _DSML_RE_PARAM.findall(corpo_invoke):
+            achou_tag_param = True
+            params[pnome.strip()] = _dsml_converter_valor(pvalor, pstring)
+
+        if not achou_tag_param:
+            # Variante 2: o corpo do invoke e o proprio JSON dos parametros
+            tentativa = corpo_invoke.strip()
+            if tentativa:
+                try:
+                    parsed = json.loads(tentativa)
+                    if isinstance(parsed, dict):
+                        params = parsed
+                except (json.JSONDecodeError, ValueError):
+                    pass
+
+        chamadas.append({
+            "id": f"dsml_{abs(hash(nome + str(params) + str(i))) % 100000}",
+            "type": "function",
+            "function": {"name": nome, "arguments": json.dumps(params, ensure_ascii=False)},
+        })
+
+    return chamadas
+
+
+def limpar_markup_dsml(texto: str) -> str:
+    """
+    Remove o markup DSML do que o usuario ve.
+
+    Sem isto o chat mostra `<｜DSML｜tool_calls>` cru na conversa — foi o que o
+    usuario relatou. Aqui NAO tentamos preservar o conteudo extraido: ele ja vai
+    para a execucao da ferramenta, e repeti-lo no texto so poluiria a resposta.
+    """
+    if not texto or "DSML" not in texto:
+        return texto
+
+    limpo = _DSML_RE_BLOCO.sub("", texto)     # blocos completos
+    limpo = _DSML_RE_INVOKE.sub("", limpo)    # invokes sem container
+    # Tags soltas ou malformadas (o modelo as vezes emite nome de tag ilegivel).
+    # Esta ultima limpeza e generica de proposito: melhor remover do que vazar.
+    limpo = re.sub(_DSML_FECHA + r"[^>]*>", "", limpo)
+    limpo = re.sub(_DSML_ABRE + r"[^>]*>", "", limpo)
+    # Sobras do marcador sem tag fechada
+    limpo = re.sub(_DSML_FECHA, "", limpo)
+    limpo = re.sub(_DSML_ABRE, "", limpo)
+    return limpo.strip()
+
+
+def extrair_tools_do_texto(texto: str) -> list:
+    """
+    Extrai tool calls emitidas como texto, cobrindo TODOS os formatos conhecidos.
+
+    Existe para acabar com uma assimetria que causava o bug relatado:
+    `stream_chat_with_tools` tinha fallback de texto e
+    `complete_chat_with_tools` NAO tinha. Como o caminho das TAREFAS usa o
+    nao-streaming, um modelo que emite a chamada em texto simplesmente nao
+    executava nada — o texto virava "resposta final".
+
+    Ordem: DSML primeiro (pode trazer varias chamadas e e inequivoco), depois o
+    extrator generico (Gemini XML, JSON, `bash("...")`) que devolve uma so.
+    """
+    if not texto:
+        return []
+    chamadas = extrair_dsml(texto)
+    if chamadas:
+        return chamadas
+    unica = _extract_tool_from_text(texto)
+    return [unica] if unica else []
+
+
 def _extract_tool_from_text(text: str) -> dict | None:
     """Detecta e extrai tool calls que o modelo gerou como texto (nao native)."""
     if not text or len(text.strip()) < 5:
@@ -834,16 +1026,26 @@ async def stream_chat_with_tools(
                 },
             })
         print(f"[LLM] YIELDING tool_calls: {[r['function']['name'] for r in result]}")
-        yield {"type": "tool_calls", "data": result, "content": accumulated_content, "reasoning": accumulated_reasoning}
+        yield {"type": "tool_calls", "data": result, "content": limpar_markup_dsml(accumulated_content), "reasoning": accumulated_reasoning}
     else:
-        # Fallback: extrai tool calls do texto quando o modelo nao usa native tool calling
-        extracted = _extract_tool_from_text(accumulated_content)
-        if extracted:
-            print(f"[LLM] FALLBACK extracted tool from text: {extracted['function']['name']}")
-            yield {"type": "tool_calls", "data": [extracted], "content": accumulated_content, "reasoning": accumulated_reasoning}
+        # Fallback: extrai tool calls do texto quando o modelo nao usa native tool calling.
+        #
+        # Cobre o formato DSML (DeepSeek V3.2/V4), que era o que fazia o modelo
+        # "falar que ia fazer e nao fazer": a chamada vinha como texto e nada era
+        # executado. Antes chamava `_extract_tool_from_text` (que devolve UMA
+        # chamada e nao conhecia DSML); agora usa `extrair_tools_do_texto`.
+        extraidas = extrair_tools_do_texto(accumulated_content)
+        if extraidas:
+            print(f"[LLM] FALLBACK extraiu do texto: {[t['function']['name'] for t in extraidas]}")
+            yield {
+                "type": "tool_calls",
+                "data": extraidas,
+                "content": limpar_markup_dsml(accumulated_content),
+                "reasoning": accumulated_reasoning,
+            }
         else:
             print(f"[LLM] NO TOOL CALLS - yielding done with content: {accumulated_content[:200]}")
-            yield {"type": "done", "content": accumulated_content, "reasoning": accumulated_reasoning}
+            yield {"type": "done", "content": limpar_markup_dsml(accumulated_content), "reasoning": accumulated_reasoning}
 
 
 @async_retry(max_attempts=3, delay=1.0, backoff=2.0)
@@ -904,10 +1106,36 @@ async def complete_chat_with_tools(
         return {
             "type": "tool_calls",
             "data": parsed_tool_calls,
-            "content": content,
+            "content": limpar_markup_dsml(content),
             "reasoning": reasoning,
         }
-    return {"type": "content", "data": content, "reasoning": reasoning}
+
+    # ── FALLBACK QUE FALTAVA (causa do bug relatado) ─────────────────────────
+    #
+    # Este caminho NAO-streaming e o usado pelas TAREFAS (routes/chat.py
+    # `complete_chat_with_tools` -> execute_tool). Ele nao tinha fallback nenhum:
+    # se o modelo nao devolvesse `tool_calls` nativo, o texto era tratado como
+    # resposta final e o loop TERMINAVA.
+    #
+    # Como o DeepSeek V3.2/V4 (sobretudo via OpenRouter) escreve a chamada no
+    # formato DSML dentro do TEXTO, o resultado era exatamente o que o usuario
+    # descreveu: o modelo anuncia a ferramenta, mostra o plano, e nada acontece.
+    #
+    # O `if tools:` e essencial: sem ferramentas oferecidas, nao faz sentido
+    # inventar chamada a partir de texto (evita falso positivo em conversa normal
+    # que apenas cite um JSON de exemplo).
+    if tools:
+        do_texto = extrair_tools_do_texto(content)
+        if do_texto:
+            print(f"[LLM] FALLBACK (nao-stream) extraiu do texto: {[t['function']['name'] for t in do_texto]}")
+            return {
+                "type": "tool_calls",
+                "data": do_texto,
+                "content": limpar_markup_dsml(content),
+                "reasoning": reasoning,
+            }
+
+    return {"type": "content", "data": limpar_markup_dsml(content), "reasoning": reasoning}
 
 
 def build_user_content(text: str, images: list[str] = None) -> str | list:

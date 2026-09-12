@@ -72,6 +72,8 @@ TESTES = [
      "TODOS OS TESTES PASSARAM"),
     ("test_provedores.py", "Provedores: comuns + personalizados criados pelo usuario",
      "TODOS OS TESTES PASSARAM"),
+    ("test_dsml_tools.py", "Ferramentas: parser DSML (modelo que anuncia e nao executa)",
+     "TODOS OS TESTES PASSARAM"),
     ("audit_headless_tools.py", "Auditoria: quais tools carregam (headless)",
      "NAO importam/carregam: 0"),
 ]
