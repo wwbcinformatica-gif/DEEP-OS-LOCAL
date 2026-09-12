@@ -1367,48 +1367,12 @@ const JarvisPage: React.FC = () => {
             <button onClick={newConversation} title="Nova conversa (limpa) — nao apaga nenhuma conversa do historico" style={s.convNewBtn}>+</button>
             <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nova conversa'}</button>
             <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
-            {/* ── Workspace: chip DISCRETO na barra ──────────────────────────
-                Mostra so o nome da raiz, em texto pequeno e apagado. Clicar
-                abre o seletor. A ideia e organizar o historico por raiz sem
-                disputar atencao com o nome da conversa nem mudar o layout. */}
-            <button
-              onClick={() => setEditandoWorkspace(v => !v)}
-              title={`Workspace atual: ${workspaceAtivo} — clique para trocar`}
-              style={{
-                background: 'none', border: '1px solid #2a2a2a', borderRadius: 8,
-                color: '#666', fontSize: 9, padding: '0 5px', cursor: 'pointer',
-                maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap' as const, flexShrink: 0,
-              }}
-            >{'\u25F0'} {workspaceAtivo}</button>
-            {editandoWorkspace && (
-              <div style={{ position: 'absolute', top: '100%', right: 6, zIndex: 120, background: '#141414', border: '1px solid #2a2a2a', borderRadius: 6, padding: 6, minWidth: 150 }}>
-                <div style={{ fontSize: 8, color: '#555', letterSpacing: 1, marginBottom: 4 }}>WORKSPACE</div>
-                {todosWorkspaces.map(w => (
-                  <div key={w} onClick={() => {
-                    setWorkspaceAtivo(w);
-                    tenantSet('jarvis_workspace', w);
-                    // Move a conversa aberta para a raiz escolhida
-                    if (activeConvId) setConversationWorkspace(activeConvId, w);
-                    setConversations(getConversations());
-                    setEditandoWorkspace(false);
-                  }} style={{ fontSize: 10, padding: '3px 4px', cursor: 'pointer', color: w === workspaceAtivo ? '#00d9ff' : '#999', borderRadius: 3 }}>
-                    {w === workspaceAtivo ? '\u2713 ' : ''}{w}
-                  </div>
-                ))}
-                <div style={{ display: 'flex', gap: 4, marginTop: 5, borderTop: '1px solid #222', paddingTop: 5 }}>
-                  <input value={novoWorkspace} onChange={e => setNovoWorkspace(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && novoWorkspace.trim()) {
-                      const w = novoWorkspace.trim();
-                      setWorkspaceAtivo(w); tenantSet('jarvis_workspace', w);
-                      if (activeConvId) setConversationWorkspace(activeConvId, w);
-                      setTodosWorkspaces(getWorkspaces()); setConversations(getConversations());
-                      setNovoWorkspace(''); setEditandoWorkspace(false);
-                    } }}
-                    placeholder="nova raiz..." style={{ flex: 1, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 3, color: '#ccc', fontSize: 9, padding: '2px 4px', outline: 'none' }} />
-                </div>
-              </div>
-            )}
+            {/* O CHIP DE WORKSPACE FOI REMOVIDO DAQUI.
+                Ele criava raiz num lugar e a arvore criava noutro — o usuario
+                via DOIS workspaces ("Geral" e o que ele criou) e um campo "nova
+                raiz" repetido, sem saber qual usar. Agora existe UM lugar so:
+                a arvore, abaixo do titulo do Jarvis (o "+" no cabecalho
+                WORKSPACES). Aqui na barra ficaram apenas as acoes da conversa. */}
             {/* Exportar a conversa — a pedido do usuario: "colocar um download
                 no historico para salvar o estudo ou pesquisa".
                 Gera um .md com as mensagens (e a transcricao de voz, se houver),

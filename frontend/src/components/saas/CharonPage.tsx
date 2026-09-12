@@ -226,20 +226,50 @@ const CharonPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'chat' | 'config' | 'help'>('chat');
   const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
   const [activeConvId, setActiveConvId] = useState<string>(() => {
-    const migrated = migrateLegacyData();
-    if (migrated) return migrated;
-    const convs = getConversations();
-    return convs[0]?.id || '';
+    // Migra dados antigos se existirem (efeito colateral necessario) — mas NAO
+    // adota a conversa mais recente.
+    //
+    // Mesma regra do Jarvis: abrir o Charon e SESSAO NOVA. Antes ele abria na
+    // conversa mais recente, o que alem de confundir agravava a corrida do
+    // efeito de salvar (que gravava vazio por cima justamente dessa conversa
+    // adotada automaticamente). As conversas antigas ficam no historico,
+    // alcancaveis pela arvore.
+    migrateLegacyData();
+    return '';
   });
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [activityLog, setActivityLog] = useState<TranscriptEntry[]>([]);
   const [showConvMenu, setShowConvMenu] = useState(false);
 
   // Load transcripts when active conversation changes
+  //
+  // ── CORRIDA QUE APAGAVA O HISTORICO DO CHARON ────────────────────────────
+  //
+  // BUG RELATADO: "quando clica no historico aparece 'Restaurando contexto: 300
+  // falas desta conversa' mas nunca restaura o historico no painel central".
+  //
+  // O efeito de CARREGAR e o de SALVAR dependem os dois de `activeConvId`. Eles
+  // rodam no MESMO commit, e nesse momento o estado `transcripts` ainda e o
+  // ANTERIOR (a mudanca de estado so vale no render seguinte). Entao:
+  //
+  //   1. carregar: le os 300 registros da conversa e agenda o estado novo;
+  //   2. salvar: grava o `transcripts` ATUAL — que na primeira montagem e `[]` —
+  //      POR CIMA da conversa que acabou de ser lida.
+  //
+  // Ou seja: abrir o Charon (ou trocar de conversa) gravava vazio sobre o
+  // historico. O painel ficava sem nada, e o dado ia embora de verdade.
+  //
+  // O JarvisPage ja tinha essa trava; o CharonPage nao tinha. Agora os dois tem.
+  const carregandoConversaRef = useRef(false);
+
   useEffect(() => {
     if (activeConvId) {
+      carregandoConversaRef.current = true;
       setTranscripts(getTranscripts(activeConvId));
       setActivityLog(getActivityLog(activeConvId));
+      // Libera no proximo tick, depois que o React aplicou o estado novo.
+      const t = setTimeout(() => { carregandoConversaRef.current = false; }, 0);
+      return () => clearTimeout(t);
     }
   }, [activeConvId]);
   const [inputText, setInputText] = useState('');
@@ -459,6 +489,13 @@ const CharonPage: React.FC = () => {
     rightListRef.current?.scrollTo({ top: rightListRef.current.scrollHeight, behavior: 'smooth' });
     activityRef.current?.scrollTo({ top: activityRef.current.scrollHeight, behavior: 'smooth' });
     if (activeConvId) {
+      // NAO gravar enquanto a conversa esta sendo carregada.
+      //
+      // Sem esta guarda, este efeito rodava no MESMO commit do carregar — com o
+      // `transcripts` anterior (vazio, na primeira montagem) — e gravava vazio
+      // por cima do historico da conversa. Era a causa de "nunca restaura o
+      // historico no painel central" (o dado era apagado, nao so escondido).
+      if (carregandoConversaRef.current) return;
       saveTranscripts(activeConvId, transcripts);
       saveActivityLog(activeConvId, activityLog);
     }

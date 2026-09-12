@@ -22,12 +22,17 @@ export interface Conversation {
 /** Workspace usado quando a conversa nao tem um definido. */
 export const WORKSPACE_PADRAO = 'Geral';
 
-/** Raizes disponiveis: as ja usadas + a padrao (sempre presente). */
+/** Raizes disponiveis: as que estao EM USO (mais a padrao, so se necessario). */
 export function getWorkspaces(): string[] {
-  const usados = new Set<string>([WORKSPACE_PADRAO]);
+  const usados = new Set<string>();
   for (const c of getConversations()) {
-    if (c.workspace) usados.add(c.workspace);
+    usados.add(c.workspace || WORKSPACE_PADRAO);
   }
+  // "Geral" so aparece quando esta em uso, ou quando nao ha nada ainda (para o
+  // usuario ter onde cair). Antes ele era ADICIONADO SEMPRE, entao quem criava
+  // uma raiz propria via DUAS na arvore — uma delas vazia e sem uso. O usuario
+  // relatou exatamente isso.
+  if (usados.size === 0) usados.add(WORKSPACE_PADRAO);
   return [...usados].sort((a, b) => a.localeCompare(b, 'pt-BR'));
 }
 

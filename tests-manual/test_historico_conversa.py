@@ -164,15 +164,12 @@ check("jarvis_workspace" in jarvis,
       "o workspace ativo e lembrado entre sessoes (localStorage)",
       "o workspace ativo se perde ao recarregar")
 # Discreto: precisa ser um chip pequeno, nao um painel
-m_chip = re.search(r"Workspace atual: \$\{workspaceAtivo\}", jarvis)
-check(m_chip is not None, "o chip tem tooltip explicando", "o chip nao explica o que faz")
-# Discreto: o estilo do chip vem logo depois do tooltip e precisa usar fonte
-# pequena. (Procurar numa janela fixa a partir do tooltip e mais preciso do que
-# partir o arquivo por uma palavra.)
-trecho_chip = jarvis[m_chip.start():m_chip.start() + 700] if m_chip else ""
-check("fontSize: 9" in trecho_chip,
-      "o chip usa fonte pequena (discreto, como pedido)",
-      f"o chip nao usa fonte pequena — estilo encontrado: {trecho_chip[:200]!r}")
+# Discreto: o chip na barra foi REMOVIDO (ver secao 10) — quem cuida da criacao
+# de raiz agora e o "+" do cabecalho da arvore. Aqui so verificamos que a arvore
+# tem esse ponto unico.
+check('title="Nova raiz (workspace)"' in jarvis,
+      "a arvore tem o '+' de criar raiz (ponto unico)",
+      "nao ha botao de criar raiz na arvore")
 # Agrupamento na lista
 check("conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws)" in jarvis,
       "a lista agrupa as conversas por workspace",
@@ -337,6 +334,64 @@ check("Apagar TODAS as conversas?" in janela,
 check("NAO remove: sua conta" in janela,
       "a confirmacao explica o que NAO e removido",
       "a confirmacao nao tranquiliza sobre o que fica")
+
+print()
+print("=== 9. Charon: a corrida que APAGAVA o historico ===")
+# BUG RELATADO: "quando clica no historico aparece 'Restaurando contexto: 300
+# falas desta conversa' mas nunca restaura o historico no painel central".
+#
+# O carregar e o salvar dependem os dois de `activeConvId` e rodam no MESMO
+# commit — quando o estado `transcripts` ainda e o anterior (vazio, na primeira
+# montagem). O salvar gravava esse vazio POR CIMA da conversa. Nao era so um
+# problema de exibicao: o dado ia embora.
+check("carregandoConversaRef" in charon,
+      "o Charon TEM a trava de carregamento (o Jarvis ja tinha)",
+      "o Charon nao tem a trava — a corrida apaga o historico")
+m_save = re.search(r"if \(activeConvId\) \{\s*(?://[^\n]*\n\s*)*if \(carregandoConversaRef\.current\) return;", charon)
+check(m_save is not None,
+      "o efeito de SALVAR do Charon respeita a trava",
+      "a trava existe mas o salvar nao a consulta — continua gravando vazio")
+check("carregandoConversaRef.current = false" in charon,
+      "a trava do Charon e liberada",
+      "a trava nunca e liberada — o Charon pararia de salvar")
+check(re.search(r"const carregandoConversaRef = useRef\(", charon) is not None,
+      "a trava do Charon e useRef (vale no mesmo commit)",
+      "a trava nao e useRef — so valeria no render seguinte, tarde demais")
+
+# Abrir o Charon tambem deve ser sessao nova (mesma regra do Jarvis), o que
+# ainda reduz a superficie do bug (nao adota a conversa mais recente sozinho).
+m_init_c = re.search(r"const \[activeConvId, setActiveConvId\] = useState<string>\(\(\) => \{(.*?)\n  \}\);", charon, re.S)
+init_c = m_init_c.group(1) if m_init_c else ""
+check("convs[0]?.id" not in init_c,
+      "o Charon NAO adota a conversa mais recente ao abrir",
+      "o Charon ainda abre na conversa anterior")
+check("migrateLegacyData()" in init_c,
+      "a migracao de dados antigos continua rodando",
+      "a migracao foi removida junto — dados antigos ficariam sem migrar")
+
+print()
+print("=== 10. Um lugar so para criar workspace ===")
+# O usuario viu DOIS workspaces ("Geral" e o que ele criou) e um campo "nova
+# raiz" repetido: o chip da barra criava raiz num lugar e a arvore noutro.
+check("O CHIP DE WORKSPACE FOI REMOVIDO" in jarvis,
+      "o chip de workspace saiu da barra (ficou so a arvore)",
+      "o chip continua na barra — dois lugares criando raiz")
+check("Workspace atual:" not in jarvis,
+      "o seletor de workspace duplicado foi removido",
+      "ainda existe o seletor de workspace na barra")
+check('title="Nova raiz (workspace)"' in jarvis,
+      "ha UM lugar para criar raiz (o + do cabecalho da arvore)",
+      "nao ha botao unico de criar raiz")
+
+# getWorkspaces nao pode forcar 'Geral' quando ha raizes em uso
+m_ws = re.search(r"export function getWorkspaces\(\): string\[\] \{(.*?)\n\}", storage, re.S)
+corpo_ws = m_ws.group(1) if m_ws else ""
+check("new Set<string>([WORKSPACE_PADRAO])" not in corpo_ws,
+      "getWorkspaces NAO forca 'Geral' sempre",
+      "getWorkspaces ainda adiciona 'Geral' sempre — aparecem duas raizes")
+check("usados.size === 0" in corpo_ws,
+      "'Geral' so aparece quando esta em uso (ou quando nao ha nada)",
+      "a regra de quando mostrar 'Geral' nao esta clara")
 
 print()
 print("=" * 70)
