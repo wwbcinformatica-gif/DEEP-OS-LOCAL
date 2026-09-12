@@ -402,7 +402,7 @@ extrator (foi essa assimetria que causou o bug).
 
 ### 12. Verificações executadas
 
-- `tests-manual/run_all.py` → **17/17 arquivos passando**
+- `tests-manual/run_all.py` → **19/19 arquivos passando** (17 na altura do primeiro deploy; 19 após o parser DSML, o histórico do Charon e a voz do Jarvis)
 - `tsc --noEmit` → **0 erros novos** nos arquivos alterados (14 erros pré-existentes em outros)
 - `import main` → OK, **250 rotas**
 - Chaves reais do usuário **intactas** após os testes (9 provedores no `.env`)
@@ -425,8 +425,7 @@ Antes desta sessão esse caminho era impossível: o campo da OpenAI **não
 existia**, o placeholder `***saved***` sobrescrevia a chave real, o erro era
 engolido por `.catch(() => {})` e na VPS o `401` do middleware ficava invisível.
 
-**E a execução de ferramentas também foi confirmada** (mesma data). O pedido
-*"faça uma varredura procurando arquivos .gguf"* — o **exato cenário que
+**E a execução de ferramentas também foi confirmada** (mesma data). O pedido*"faça uma varredura procurando arquivos .gguf"* — o **exato cenário que
 falhava** antes, quando o modelo só anunciava o plano — agora executa de verdade
 e devolveu o resultado real:
 
@@ -445,6 +444,23 @@ executou a ferramenta como **leu o disco certo** e respondeu com dados reais.
 
 **Ainda não testado com voz real** (precisa de microfone): a interrupção do
 Charon e a saudação curta. Ver a seção 14 mais abaixo para o roteiro.
+
+**Filtro de fluxo DSML — verificado no servidor de produção** (commit `215741c`):
+
+```
+$ /root/DEEP-OS/venv/bin/python -c "from core.llm_native import FiltroDSML; print('FILTRO OK')"
+FILTRO OK
+
+$ ... -c "from core.llm_native import FiltroDSML as F;V=chr(0xFF5C);f=F();
+         s=''.join(f.alimentar(x) for x in ['oi ','<'+V+'DS','ML'+V+'tool_calls>',' fim'])+f.finalizar();
+         print('FILTRO OK' if 'DSML' not in s else 'FALHOU: '+s)"
+FILTRO OK
+```
+
+O segundo teste é o que importa: prova que um marcador **partido entre tokens**
+(como o streaming realmente entrega) é removido. Foi essa a causa de o usuário
+continuar vendo o markup na tela mesmo com o parser já funcionando — a limpeza
+existia só no texto final, não no fluxo.
 
 ---
 
