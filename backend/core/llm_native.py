@@ -15,6 +15,7 @@ from core.config import (
     OPENCLAUDE_BASE_URL,
     OPENCODE_API_KEY,
     OPENROUTER_API_KEY,
+    ZHIPU_API_KEY,
 )
 from core.retry import async_retry
 
@@ -104,6 +105,7 @@ def _load_key_from_file(provider: str) -> str:
             "nvidia": "nvidia_api_key",
             "mimo": "mimo_api_key",
             "openclaude": "openclaude_api_key",
+            "zhipu": "zhipu_api_key",
         }
         return data.get(key_map.get(provider, ""), "")
     except Exception:
@@ -175,6 +177,15 @@ def get_client(provider: str, api_key_override: str = "", timeout_read: float = 
             raise ValueError("MIMO_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url="https://api.xiaomimimo.com/v1",
+            api_key=key,
+            timeout=timeout,
+        )
+    elif provider == "zhipu":
+        key = api_key_override or ZHIPU_API_KEY or _load_key_from_file("zhipu")
+        if not key:
+            raise ValueError("ZHIPU_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
+        return AsyncOpenAI(
+            base_url="https://open.bigmodel.cn/api/paas/v4/",
             api_key=key,
             timeout=timeout,
         )

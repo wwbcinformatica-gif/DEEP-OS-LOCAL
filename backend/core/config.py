@@ -29,6 +29,7 @@ OPENCODE_API_KEY = os.environ.get("OPENCODE_API_KEY", "")
 OPENCLAUDE_API_KEY = os.environ.get("OPENCLAUDE_API_KEY", "")
 MIMO_API_KEY = os.environ.get("MIMO_API_KEY", "")
 NVIDIA_API_KEY = os.environ.get("NVIDIA_API_KEY", "")
+ZHIPU_API_KEY = os.environ.get("ZHIPU_API_KEY", "")
 OPENCLAUDE_BASE_URL = os.environ.get("OPENCLAUDE_BASE_URL", "http://localhost:4000/api/v1")
 
 

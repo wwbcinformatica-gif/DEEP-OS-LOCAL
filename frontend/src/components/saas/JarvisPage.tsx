@@ -74,7 +74,80 @@ const PROVIDERS = [
   { id: 'mimo', label: 'MiMo', keyField: 'mimo', models: [
     { id: 'mimo-v2.5', label: 'MiMo V2.5' },
   ]},
+  { id: 'zhipu', label: 'Zhipu AI (GLM)', keyField: 'zhipu', models: [
+    { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash (novo)' },
+    { id: 'glm-5.3', label: 'GLM-5.3' },
+    { id: 'glm-5.2', label: 'GLM-5.2' },
+  ]},
 ];
+
+const LANG_LABELS: Record<string, string> = {
+  python: 'Python', javascript: 'JavaScript', typescript: 'TypeScript',
+  jsx: 'JSX', tsx: 'TSX', java: 'Java', cpp: 'C++', c: 'C',
+  go: 'Go', rust: 'Rust', ruby: 'Ruby', php: 'PHP',
+  html: 'HTML', css: 'CSS', sql: 'SQL', bash: 'Bash',
+  json: 'JSON', yaml: 'YAML', markdown: 'Markdown', shell: 'Shell',
+};
+
+function highlightCode(code: string, lang: string): React.ReactNode {
+  const lines = code.split('\n');
+  return lines.map((line, i) => {
+    let highlighted = line
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/(\/\/.*$|#.*$)/gm, '<span style="color:#6a9955">$1</span>')
+      .replace(/(["'`])((?:(?!\1)[^\\]|\\.)*)(\1)/g, '<span style="color:#ce9178">$1$2$3</span>')
+      .replace(/\b(import|from|export|default|const|let|var|function|return|if|else|for|while|class|extends|new|this|async|await|try|catch|throw|def|print|self|True|False|None|in|not|and|or|is|with|as|elif|except|lambda|yield|raise|pass|break|continue|switch|case|do|type|interface|enum|struct|pub|fn|mut|use|mod|crate|match|loop|unsafe|impl|trait|where|async|move|ref|dyn|abstract|final|static|synchronized|volatile|transient|native|public|private|protected|internal|override|readonly|optional|nullable)\b/g, '<span style="color:#569cd6">$1</span>')
+      .replace(/\b(\d+\.?\d*)\b/g, '<span style="color:#b5cea8">$1</span>');
+    return (
+      <div key={i} style={{ display: 'flex' }}>
+        <span style={{ userSelect: 'none', color: '#555', minWidth: 32, textAlign: 'right', paddingRight: 12, fontSize: 12 }}>{i + 1}</span>
+        <span dangerouslySetInnerHTML={{ __html: highlighted }} />
+      </div>
+    );
+  });
+}
+
+function renderMessageContent(content: string): React.ReactNode {
+  const parts = content.split(/(```[\s\S]*?```)/g);
+  return parts.map((part, i) => {
+    const m = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+    if (m) {
+      const lang = m[1] || '';
+      const code = m[2].replace(/\n$/, '');
+      return (
+        <div key={i} style={{
+          margin: '8px 0', borderRadius: 8, overflow: 'hidden',
+          border: '1px solid #2a2a3e', background: '#0d0d1a',
+        }}>
+          {lang && (
+            <div style={{
+              padding: '4px 12px', background: '#16162a', borderBottom: '1px solid #2a2a3e',
+              fontSize: 11, color: '#888', fontWeight: 600, letterSpacing: 0.5,
+            }}>
+              {LANG_LABELS[lang] || lang.toUpperCase()}
+            </div>
+          )}
+          <pre style={{
+            margin: 0, padding: '12px 8px', overflowX: 'auto',
+            fontSize: 12.5, lineHeight: 1.65, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
+            color: '#d4d4d4',
+          }}>
+            <code>{highlightCode(code, lang)}</code>
+          </pre>
+        </div>
+      );
+    }
+    const inlineParts = part.split(/(`[^`]+`)/g);
+    return (
+      <span key={i}>{inlineParts.map((ip, j) => {
+        if (ip.startsWith('`') && ip.endsWith('`')) {
+          return <code key={j} style={{ background: '#1a1a2e', padding: '1px 5px', borderRadius: 4, fontSize: 12, color: '#e06c75', fontFamily: "'Cascadia Code', 'Fira Code', monospace" }}>{ip.slice(1, -1)}</code>;
+        }
+        return <span key={j}>{ip}</span>;
+      })}</span>
+    );
+  });
+}
 
 const JarvisPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
@@ -663,8 +736,8 @@ const JarvisPage: React.FC = () => {
                     {msg.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <div style={{ color: '#ddd', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 13, lineHeight: 1.7, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
-                  {msg.content}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>{'\u258C'}</span>}
+                <div style={{ color: '#ddd', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 13, lineHeight: 1.7, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
+                  {renderMessageContent(msg.content)}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>{'\u258C'}</span>}
                 </div>
               </div>
             ))}

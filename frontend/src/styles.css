@@ -802,7 +802,6 @@ aside *,
 textarea,
 input,
 button,
-select,
 [role='button'] {
   font-size: var(--base-font-size, 15px) !important;
 }

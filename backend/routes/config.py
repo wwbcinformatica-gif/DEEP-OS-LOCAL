@@ -378,6 +378,7 @@ async def update_api_keys(request: dict):
             "MIMO_API_KEY": "mimo_api_key",
             "OPENCLAUDE_API_KEY": "openclaude_api_key",
             "OPENCODE_API_KEY": "opencode_api_key",
+            "ZHIPU_API_KEY": "zhipu_api_key",
         }
         updated = []
         for env_key, json_key in key_map.items():
@@ -409,6 +410,7 @@ async def get_api_keys():
             "mimo_api_key": "mimo",
             "openclaude_api_key": "openclaude",
             "opencode_api_key": "opencode",
+            "zhipu_api_key": "zhipu",
         }
         for json_key, name in key_map.items():
             val = data.get(json_key, "")
