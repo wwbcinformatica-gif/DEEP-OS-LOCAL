@@ -1,0 +1,157 @@
+/*
+ * Project: ComputerStorePage
+ * File: css/style.css
+ * Description: The primary stylesheet for global styles and resets,
+ *              including responsive design and modern CSS practices.
+ */
+
+/* --- CSS Variables --- */
+:root {
+    /* Colors */
+    --primary-color: #007bff; /* Blue */
+    --secondary-color: #6c757d; /* Gray */
+    --accent-color: #28a745; /* Green for success/call to action */
+    --text-color: #343a40; /* Dark text */
+    --light-text-color: #f8f9fa; /* Light text for dark backgrounds */
+    --background-color: #f8f9fa; /* Light background */
+    --card-background: #ffffff; /* White card background */
+    --border-color: #dee2e6; /* Light gray border */
+    --hover-color: #0056b3; /* Darker blue on hover */
+
+    /* Typography */
+    --font-family-primary: 'Roboto', sans-serif;
+    --font-family-secondary: 'Open Sans', sans-serif;
+    --font-size-base: 1rem; /* 16px */
+    --font-size-sm: 0.875rem; /* 14px */
+    --font-size-lg: 1.25rem; /* 20px */
+    --font-size-xl: 1.5rem; /* 24px */
+    --font-size-h1: 2.5rem; /* 40px */
+    --font-size-h2: 2rem; /* 32px */
+    --font-size-h3: 1.75rem; /* 28px */
+    --font-size-h4: 1.5rem; /* 24px */
+
+    /* Spacing */
+    --spacing-xs: 0.25rem; /* 4px */
+    --spacing-sm: 0.5rem; /* 8px */
+    --spacing-md: 1rem; /* 16px */
+    --spacing-lg: 1.5rem; /* 24px */
+    --spacing-xl: 2rem; /* 32px */
+    --spacing-xxl: 3rem; /* 48px */
+
+    /* Border Radius */
+    --border-radius-sm: 0.25rem; /* 4px */
+    --border-radius-md: 0.5rem; /* 8px */
+
+    /* Box Shadow */
+    --box-shadow-sm: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    --box-shadow-md: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+/* --- CSS Reset & Global Styles --- */
+
+/* Box sizing for all elements */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+/* Base HTML and Body styles */
+html {
+    font-size: var(--font-size-base); /* Ensures 1rem = 16px by default */
+    line-height: 1.5;
+    -webkit-text-size-adjust: 100%; /* Prevent text resizing on orientation change */
+    scroll-behavior: smooth; /* Smooth scrolling for anchor links */
+}
+
+body {
+    font-family: var(--font-family-primary);
+    color: var(--text-color);
+    background-color: var(--background-color);
+    min-height: 100vh; /* Ensure body takes full viewport height */
+    display: flex;
+    flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Remove default margin from common elements */
+h1, h2, h3, h4, h5, h6, p, ul, ol, dl, figure, blockquote {
+    margin-top: 0;
+    margin-bottom: var(--spacing-md);
+}
+
+/* Headings */
+h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-family-secondary);
+    font-weight: 700;
+    line-height: 1.2;
+    color: var(--text-color);
+}
+
+h1 { font-size: var(--font-size-h1); }
+h2 { font-size: var(--font-size-h2); }
+h3 { font-size: var(--font-size-h3); }
+h4 { font-size: var(--font-size-h4); }
+h5 { font-size: var(--font-size-xl); }
+h6 { font-size: var(--font-size-lg); }
+
+/* Links */
+a {
+    color: var(--primary-color);
+    text-decoration: none;
+    transition: color 0.2s ease-in-out, text-decoration 0.2s ease-in-out;
+}
+
+a:hover,
+a:focus {
+    color: var(--hover-color);
+    text-decoration: underline;
+    outline: none; /* Remove default focus outline */
+}
+
+/* Lists */
+ul, ol {
+    list-style: none; /* Remove default list styles */
+    margin-left: 0;
+    padding-left: 0;
+}
+
+/* Images */
+img {
+    max-width: 100%;
+    height: auto;
+    display: block; /* Remove extra space below images */
+}
+
+/* Buttons and Forms */
+button,
+input,
+select,
+textarea {
+    font-family: inherit;
+    font-size: inherit;
+    line-height: inherit;
+    margin: 0; /* Remove default margin */
+}
+
+button {
+    cursor: pointer;
+    border: none;
+    background-color: transparent;
+    padding: 0;
+}
+
+/* Accessibility */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width:

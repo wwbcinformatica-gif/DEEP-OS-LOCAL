@@ -417,9 +417,13 @@ const JarvisPage: React.FC = () => {
                   updateLastProcess({ label: 'Gerando resposta...', detail: 'Tokens recebidos' });
                 }
               } else if (event.type === 'tool_start') {
-                addProcess('tool_start', `Ferramenta: ${event.tool_name || 'desconhecida'}`, JSON.stringify(event.params || {}).slice(0, 120), 'running');
+                const toolName = event.tool || event.tool_name || 'desconhecida';
+                const params = typeof event.params === 'string' ? event.params : JSON.stringify(event.params || {}, null, 0);
+                addProcess('tool_start', `Ferramenta: ${toolName}`, params.slice(0, 150), 'running');
               } else if (event.type === 'tool_end') {
-                addProcess('tool_end', `Ferramenta concluida`, event.result ? String(event.result).slice(0, 120) : 'OK', 'done');
+                const toolName = event.tool || event.tool_name || '';
+                const result = typeof event.result === 'string' ? event.result : JSON.stringify(event.result || {}, null, 0);
+                addProcess('tool_end', `Concluida: ${toolName}`, result.slice(0, 150), 'done');
               } else if (event.type === 'error') {
                 addProcess('tool_error', `Erro: ${event.message}`, undefined, 'error');
                 fullAnswer += `\n\nErro: ${event.message}`;

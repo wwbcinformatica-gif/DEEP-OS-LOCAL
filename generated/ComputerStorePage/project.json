@@ -1,0 +1,13 @@
+{
+  "project": "ComputerStorePage",
+  "description": "A single-page HTML layout for a computer store, displaying products and basic navigation.",
+  "language": "node",
+  "generated_at": "2026-09-11T21:25:44.163988",
+  "plan_id": "f07e3e84890a",
+  "dependencies": [],
+  "commands": {
+    "run": "open index.html",
+    "test": "Open index.html in a web browser and manually inspect",
+    "build": ""
+  }
+}
