@@ -54,7 +54,7 @@ const PROVIDERS = [
   ]},
   { id: 'openrouter', label: 'OpenRouter (gratis/variados)', keyField: 'openrouter', models: [
     { id: 'openrouter/auto', label: 'Auto (melhor modelo)' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (grÃ¡tis)' },
+    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (gratis)' },
     { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
     { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
     { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
@@ -80,7 +80,7 @@ const JarvisPage: React.FC = () => {
     {
       id: '1',
       role: 'jarvis',
-      content: 'OlÃ¡! Sou o Jarvis, seu assistente inteligente. Posso ouvir vocÃª, executar tarefas e usar ferramentas. Como posso ajudar?',
+      content: 'Ola! Sou o Jarvis, seu assistente inteligente. Posso ouvir voce, executar tarefas e usar ferramentas. Como posso ajudar?',
       timestamp: new Date(),
     },
   ]);
@@ -101,6 +101,10 @@ const JarvisPage: React.FC = () => {
   const [instanceConfig, setInstanceConfig] = useState<any>(null);
   const [dynamicModels, setDynamicModels] = useState<{id: string, label: string, hasVision?: boolean}[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  const [gpuMode, setGpuMode] = useState<Record<string, boolean>>({
+    ollama: tenantGet('jarvis_gpu_ollama') !== 'false',
+    llamacpp: tenantGet('jarvis_gpu_llamacpp') !== 'false',
+  });
   const textareaHeightRef = useRef(60);
   const [textareaHeight, setTextareaHeight] = useState(60);
   const rightPanelWidthRef = useRef(280);
@@ -110,14 +114,12 @@ const JarvisPage: React.FC = () => {
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
 
-  // Load transcripts when active conversation changes
   useEffect(() => {
     if (activeConvId) {
       setTranscripts(getTranscripts(activeConvId));
     }
   }, [activeConvId]);
 
-  // Save transcripts when they change
   useEffect(() => {
     if (activeConvId && transcripts.length > 0) {
       saveTranscripts(activeConvId, transcripts);
@@ -200,9 +202,22 @@ const JarvisPage: React.FC = () => {
     }
   }, []);
 
+  const toggleGpu = async (provider: string) => {
+    const newVal = !gpuMode[provider];
+    setGpuMode(prev => ({ ...prev, [provider]: newVal }));
+    tenantSet(`jarvis_gpu_${provider}`, String(newVal));
+    try {
+      await fetch(`/${provider}/gpu`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ use_gpu: newVal }),
+      });
+    } catch (e) {}
+  };
+
   const startListening = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-      alert('Seu navegador nÃ£o suporta reconhecimento de voz. Use Chrome.');
+      alert('Seu navegador nao suporta reconhecimento de voz. Use Chrome.');
       return;
     }
 
@@ -413,7 +428,7 @@ const JarvisPage: React.FC = () => {
                   return updated;
                 });
               } else if (event.type === 'error') {
-                fullAnswer += `\n\nâŒ Erro: ${event.message}`;
+                fullAnswer += `\n\nErro: ${event.message}`;
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
@@ -448,7 +463,7 @@ const JarvisPage: React.FC = () => {
         if (idx >= 0) {
           updated[idx] = {
             ...updated[idx],
-            content: `Desculpe, ocorreu um erro: ${err.message}. Verifique se o backend estÃ¡ rodando e se sua chave de API estÃ¡ configurada.`,
+            content: `Desculpe, ocorreu um erro: ${err.message}. Verifique se o backend esta rodando e se sua chave de API esta configurada.`,
             isStreaming: false,
           };
         }
@@ -468,7 +483,6 @@ const JarvisPage: React.FC = () => {
       e.preventDefault();
       handleSendMessage();
     }
-    // Auto-resize textarea
     const target = e.target as HTMLTextAreaElement;
     setTimeout(() => {
       target.style.height = 'auto';
@@ -476,7 +490,6 @@ const JarvisPage: React.FC = () => {
     }, 0);
   };
 
-  // â”€â”€â”€ Conversation management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const switchConversation = (convId: string) => {
     setActiveConvId(convId);
     setShowConvMenu(false);
@@ -490,7 +503,7 @@ const JarvisPage: React.FC = () => {
     setMessages([{
       id: '1',
       role: 'jarvis',
-      content: 'OlÃ¡! Sou o Jarvis, seu assistente inteligente. Como posso ajudar?',
+      content: 'Ola! Sou o Jarvis, seu assistente inteligente. Como posso ajudar?',
       timestamp: new Date(),
     }]);
     setShowConvMenu(false);
@@ -498,54 +511,33 @@ const JarvisPage: React.FC = () => {
 
   const handleDeleteConversation = (convId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!confirm('Excluir esta conversa?')) return;
+    if (conversations.length <= 1) return;
     deleteConversation(convId);
-    const remaining = getConversations();
-    setConversations(remaining);
+    const updated = getConversations();
+    setConversations(updated);
     if (activeConvId === convId) {
-      const next = remaining[0];
-      if (next) {
-        setActiveConvId(next.id);
-        setTranscripts(getTranscripts(next.id));
-      } else {
-        const conv = createConversation();
-        setConversations(getConversations());
-        setActiveConvId(conv.id);
-        setTranscripts([]);
-      }
+      setActiveConvId(updated[0]?.id || '');
     }
   };
 
   const handleRenameConversation = (convId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const conv = conversations.find(c => c.id === convId);
-    if (!conv) return;
-    const newName = prompt('Renomear conversa:', conv.name);
-    if (newName && newName.trim()) {
-      renameConversation(convId, newName.trim());
+    const name = prompt('Novo nome da conversa:');
+    if (name && name.trim()) {
+      renameConversation(convId, name.trim());
       setConversations(getConversations());
     }
   };
 
+  const activeConv = conversations.find(c => c.id === activeConvId);
   const formatConvTime = (ts: number) => {
     const d = new Date(ts);
-    const now = new Date();
-    const diff = now.getTime() - d.getTime();
-    if (diff < 86400000 && d.getDate() === now.getDate()) {
-      return d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    }
-    if (diff < 604800000) {
-      return d.toLocaleDateString('pt-BR', { weekday: 'short' });
-    }
-    return d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   };
-
-  const activeConv = conversations.find(c => c.id === activeConvId);
 
   return (
     <div style={s.container}>
       <div style={s.chatLayout}>
-        {/* LEFT PANEL â€” Chat */}
         <div style={s.leftPanel}>
           <div style={s.convBar}>
             <button onClick={newConversation} title="Nova conversa" style={s.convNewBtn}>+</button>
@@ -557,19 +549,19 @@ const JarvisPage: React.FC = () => {
                   <div key={conv.id} onClick={() => switchConversation(conv.id)} style={{ ...s.convItem, background: conv.id === activeConvId ? 'rgba(0,217,255,0.15)' : 'transparent' }}>
                     <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#00d9ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{conv.name}</span>
                     <span style={{ fontSize: 9, color: '#666' }}>{formatConvTime(conv.updatedAt)}</span>
-                    <button onClick={(e) => handleRenameConversation(conv.id, e)} style={s.convActionBtn}>âœŽ</button>
-                    <button onClick={(e) => handleDeleteConversation(conv.id, e)} style={{ ...s.convActionBtn, color: '#f44' }}>âœ•</button>
+                    <button onClick={(e) => handleRenameConversation(conv.id, e)} style={s.convActionBtn}>{'\u270E'}</button>
+                    <button onClick={(e) => handleDeleteConversation(conv.id, e)} style={{ ...s.convActionBtn, color: '#f44' }}>{'\u2715'}</button>
                   </div>
                 ))}
               </div>
             )}
           </div>
 
-          {/* Model/Provider header */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 12px', borderBottom: '1px solid #222', flexShrink: 0, gap: 6 }}>
             <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <span style={{ color: '#00d9ff', fontSize: 12 }}>ðŸ¤–</span>
+              <span style={{ color: '#00d9ff', fontSize: 12 }}>{'\uD83E\uDD16'}</span>
               <span style={{ fontSize: 12, color: '#00d9ff', fontWeight: 600 }}>Jarvis</span>
+              <button style={s.settingsBtn} onClick={() => setShowSettings(true)}>{'\u2699\uFE0F'}</button>
             </div>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <select value={selectedProvider} onChange={(e) => { setSelectedProvider(e.target.value); const prov = PROVIDERS.find(p => p.id === e.target.value); if (prov && prov.models.length > 0) setSelectedModel(prov.models[0].id); }} style={s.modelSelect}>
@@ -577,45 +569,12 @@ const JarvisPage: React.FC = () => {
               </select>
               <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} style={s.modelSelectWide}>
                 {((dynamicModels.length > 0 ? dynamicModels : (PROVIDERS.find(p => p.id === selectedProvider)?.models || []))).map(m => (
-                  <option key={m.id} value={m.id}>{(m as any).hasVision ? 'ðŸ‘ ' : ''}{m.label}</option>
+                  <option key={m.id} value={m.id}>{(m as any).hasVision ? '\uD83D\uDC41 ' : ''}{m.label}</option>
                 ))}
               </select>
-              <button style={s.settingsBtn} onClick={() => setShowSettings(!showSettings)}>âš™ï¸</button>
             </div>
           </div>
 
-          {/* Settings Panel */}
-          {showSettings && (
-            <div style={s.settingsPanel}>
-              <div style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff', marginBottom: 4 }}>Configuracoes</div>
-              {PROVIDERS.filter(p => !p.dynamic).map(prov => (
-                <div key={prov.id} style={{ display: 'flex', gap: 6, alignItems: 'center', marginBottom: 4 }}>
-                  <label style={{ fontSize: 10, color: '#999', minWidth: 80 }}>{prov.label}:</label>
-                  <input type="password" value={prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '')}
-                    onChange={(e) => { if (prov.keyField === 'gemini') setApiKey(e.target.value); else setApiKeys({ ...apiKeys, [prov.keyField]: e.target.value }); }}
-                    style={s.configInput} placeholder="sk-..." />
-                  <button onClick={() => {
-                    const key = prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '');
-                    if (prov.keyField === 'gemini') { tenantSet('saas_api_key', key); setApiKey(key); fetch('/api/config/api-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: key }) }).catch(() => {}); }
-                    else { tenantSet(`${prov.keyField}_api_key`, key); setApiKeys({ ...apiKeys, [prov.keyField]: key }); }
-                    const envKeyMap: Record<string, string> = { gemini: 'GEMINI_API_KEY', openrouter: 'OPENROUTER_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', nvidia: 'NVIDIA_API_KEY', mimo: 'MIMO_API_KEY', openclaude: 'OPENCLAUDE_API_KEY', opencode: 'OPENCODE_API_KEY' };
-                    const envPayload: Record<string, string> = {};
-                    Object.keys(envKeyMap).forEach(pk => { envPayload[envKeyMap[pk]] = pk === 'gemini' ? (pk === prov.keyField ? key : (apiKeys['gemini'] || tenantGet('saas_api_key') || '')) : pk === prov.keyField ? key : (apiKeys[pk] || tenantGet(`${pk}_api_key`) || ''); });
-                    fetch('/api/config/api-keys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envPayload) }).catch(() => {});
-                    alert(`Chave ${prov.label} salva!`);
-                  }} style={s.saveBtn}>Salvar</button>
-                </div>
-              ))}
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center', marginTop: 4, borderTop: '1px solid #222', paddingTop: 4 }}>
-                <label style={{ fontSize: 10, color: '#999', minWidth: 80 }}>Voz:</label>
-                <select value={selectedVoice} onChange={(e) => { setSelectedVoice(e.target.value); tenantSet('jarvis_voice', e.target.value); }} style={s.modelSelectWide}>
-                  {VOICE_OPTIONS.map(v => <option key={v.key} value={v.key}>{v.label}</option>)}
-                </select>
-              </div>
-            </div>
-          )}
-
-          {/* Messages */}
           <div style={s.messagesArea}>
             {messages.length === 0 ? (
               <div style={s.emptyState}>Jarvis pronto. Como posso ajudar?</div>
@@ -626,7 +585,7 @@ const JarvisPage: React.FC = () => {
                 borderLeft: `3px solid ${msg.role === 'user' ? '#00d9ff' : '#b478ff'}`,
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: 12 }}>{msg.role === 'user' ? 'ðŸ‘¤' : 'ðŸ¤–'}</span>
+                  <span style={{ fontSize: 12 }}>{msg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, color: msg.role === 'user' ? '#00d9ff' : '#b478ff' }}>
                     {msg.role === 'user' ? 'Voce' : 'Jarvis'}
                   </span>
@@ -635,15 +594,15 @@ const JarvisPage: React.FC = () => {
                   </span>
                 </div>
                 <div style={{ color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
-                  {msg.content}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>â–Œ</span>}
+                  {msg.content}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>{'\u258C'}</span>}
                 </div>
                 {msg.tools && msg.tools.length > 0 && (
                   <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                     {msg.tools.map((tool, i) => (
                       <div key={i} style={{ padding: '6px 8px', background: '#111', borderRadius: 4, borderLeft: `2px solid ${tool.status === 'running' ? '#f59e0b' : tool.status === 'done' ? '#10b981' : '#ef4444'}`, fontSize: 11 }}>
-                        <span style={{ color: '#999' }}>ðŸ”§</span> <span style={{ color: '#ccc', fontWeight: 600 }}>{tool.name}</span>
+                        <span style={{ color: '#999' }}>{'\uD83D\uDD27'}</span> <span style={{ color: '#ccc', fontWeight: 600 }}>{tool.name}</span>
                         <span style={{ marginLeft: 8, color: tool.status === 'running' ? '#f59e0b' : tool.status === 'done' ? '#10b981' : '#ef4444', fontSize: 10 }}>
-                          {tool.status === 'running' ? 'â³ Executando...' : tool.status === 'done' ? 'âœ… ConcluÃ­do' : 'âŒ Erro'}
+                          {tool.status === 'running' ? 'Executando...' : tool.status === 'done' ? 'Concluido' : 'Erro'}
                         </span>
                         {tool.result && <pre style={{ marginTop: 4, padding: 4, background: '#1a1a2e', borderRadius: 3, fontSize: 10, fontFamily: 'monospace', color: '#999', overflow: 'auto', maxHeight: 80, whiteSpace: 'pre-wrap' }}>{tool.result}</pre>}
                       </div>
@@ -655,7 +614,7 @@ const JarvisPage: React.FC = () => {
             {isTyping && (
               <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,217,255,0.08)', borderLeft: '3px solid #00d9ff' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: 12 }}>ðŸ¤–</span>
+                  <span style={{ fontSize: 12 }}>{'\uD83E\uDD16'}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>Jarvis</span>
                 </div>
                 <div style={{ display: 'flex', gap: 4, padding: '4px 0' }}>
@@ -668,7 +627,6 @@ const JarvisPage: React.FC = () => {
             <div ref={messagesEndRef} />
           </div>
 
-          {/* Input */}
           <div style={s.inputSection}>
             <div onPointerDown={(e) => { e.preventDefault(); const startY = e.clientY; const startH = textareaHeightRef.current; const move = (ev: PointerEvent) => { const delta = startY - ev.clientY; textareaHeightRef.current = Math.max(36, Math.min(300, startH + delta)); setTextareaHeight(textareaHeightRef.current); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ height: 6, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, margin: '2px 0' }}>
               <div style={{ width: 40, height: 3, borderRadius: 2, background: '#444' }} />
@@ -681,10 +639,10 @@ const JarvisPage: React.FC = () => {
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
-                    {isListening ? 'â¹' : 'ðŸŽ¤'}
+                    {isListening ? '\u23F9' : '\uD83C\uDF99'}
                   </button>
                   <button onClick={stopSpeaking} disabled={!isSpeaking} style={{ ...s.iconBtn, background: isSpeaking ? '#ef4444' : '#1a1a2e', color: isSpeaking ? '#fff' : '#666', opacity: isSpeaking ? 1 : 0.4 }} title={isSpeaking ? 'Parar voz' : 'Falante'}>
-                    {isSpeaking ? 'ðŸ”‡' : 'ðŸ”ˆ'}
+                    {isSpeaking ? '\uD83D\uDD07' : '\uD83D\uDD08'}
                   </button>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
                   <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
@@ -702,15 +660,13 @@ const JarvisPage: React.FC = () => {
           </div>
         </div>
 
-        {/* DRAG HANDLE */}
         <div onPointerDown={(e) => { e.preventDefault(); const startX = e.clientX; const startW = rightPanelWidthRef.current; const move = (ev: PointerEvent) => { const delta = startX - ev.clientX; rightPanelWidthRef.current = Math.max(200, Math.min(500, startW + delta)); setRightPanelWidth(rightPanelWidthRef.current); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ width: 5, cursor: 'ew-resize', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: '#111' }}>
           <div style={{ width: 3, height: 40, borderRadius: 2, background: '#333' }} />
         </div>
 
-        {/* RIGHT PANEL â€” Context/Transcripts */}
         <div style={{ ...s.rightPanel, width: rightPanelWidth }}>
           <div style={s.rightHeader}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>ðŸ¤– Jarvis</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>{'\uD83E\uDD16'} Jarvis</span>
             <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>{messages.length} msgs</span>
           </div>
           <div ref={rightListRef} style={s.messagesList}>
@@ -739,29 +695,109 @@ const JarvisPage: React.FC = () => {
           </div>
         </div>
       </div>
-    </div>
-  );
-};
 
-const OllamaStatus: React.FC = () => {
-  const [status, setStatus] = useState<'loading' | 'online' | 'offline'>('loading');
+      {showSettings && (
+        <div style={s.modalOverlay} onClick={() => setShowSettings(false)}>
+          <div style={s.modalContent} onClick={(e) => e.stopPropagation()}>
+            <div style={s.modalHeader}>
+              <span style={{ fontSize: 14, fontWeight: 700, color: '#00d9ff' }}>{'\u2699\uFE0F'} Configuracoes do Jarvis</span>
+              <button onClick={() => setShowSettings(false)} style={s.modalClose}>{'\u2715'}</button>
+            </div>
+            <div style={s.modalBody}>
+              <div style={s.settingsSection}>
+                <div style={s.sectionTitle}>Chaves de API</div>
+                {PROVIDERS.filter(p => !p.dynamic).map(prov => (
+                  <div key={prov.id} style={s.settingsRow}>
+                    <label style={s.settingsLabel}>{prov.label}</label>
+                    <div style={{ display: 'flex', gap: 6, flex: 1 }}>
+                      <input type="password" value={prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '')}
+                        onChange={(e) => { if (prov.keyField === 'gemini') setApiKey(e.target.value); else setApiKeys({ ...apiKeys, [prov.keyField]: e.target.value }); }}
+                        style={s.configInput} placeholder="sk-..." />
+                      <button onClick={() => {
+                        const key = prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '');
+                        if (prov.keyField === 'gemini') { tenantSet('saas_api_key', key); setApiKey(key); fetch('/api/config/api-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: key }) }).catch(() => {}); }
+                        else { tenantSet(`${prov.keyField}_api_key`, key); setApiKeys({ ...apiKeys, [prov.keyField]: key }); }
+                        const envKeyMap: Record<string, string> = { gemini: 'GEMINI_API_KEY', openrouter: 'OPENROUTER_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', nvidia: 'NVIDIA_API_KEY', mimo: 'MIMO_API_KEY', openclaude: 'OPENCLAUDE_API_KEY', opencode: 'OPENCODE_API_KEY' };
+                        const envPayload: Record<string, string> = {};
+                        Object.keys(envKeyMap).forEach(pk => { envPayload[envKeyMap[pk]] = pk === 'gemini' ? (pk === prov.keyField ? key : (apiKeys['gemini'] || tenantGet('saas_api_key') || '')) : pk === prov.keyField ? key : (apiKeys[pk] || tenantGet(`${pk}_api_key`) || ''); });
+                        fetch('/api/config/api-keys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envPayload) }).catch(() => {});
+                      }} style={s.saveBtn}>Salvar</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-  useEffect(() => {
-    fetch('http://localhost:11434/api/tags')
-      .then(r => r.ok ? setStatus('online') : setStatus('offline'))
-      .catch(() => setStatus('offline'));
-  }, []);
+              <div style={s.settingsSection}>
+                <div style={s.sectionTitle}>Locais (GPU / CPU)</div>
+                {['ollama', 'llamacpp'].map(prov => (
+                  <div key={prov} style={s.settingsRow}>
+                    <label style={s.settingsLabel}>{prov === 'ollama' ? 'Ollama' : 'llama.cpp'}</label>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+                      <button onClick={() => toggleGpu(prov)} style={{
+                        ...s.toggleBtn,
+                        background: gpuMode[prov] ? '#10b981' : '#333',
+                        color: gpuMode[prov] ? '#fff' : '#999',
+                      }}>
+                        {gpuMode[prov] ? 'GPU' : 'CPU'}
+                      </button>
+                      <span style={{ fontSize: 10, color: '#666' }}>{gpuMode[prov] ? 'Aceleracao por GPU' : 'Processamento na CPU'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
 
-  return (
-    <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
-      <div style={{
-        width: '10px', height: '10px', borderRadius: '50%',
-        background: status === 'online' ? '#10b981' : status === 'loading' ? '#f59e0b' : '#ef4444',
-      }}/>
-      <span style={{fontSize: '13px', color: 'var(--saas-text-muted)'}}>
-        {status === 'online' ? 'Ollama conectado' :
-         status === 'loading' ? 'Verificando...' : 'Ollama offline (instale em ollama.com)'}
-      </span>
+              <div style={s.settingsSection}>
+                <div style={s.sectionTitle}>Voz</div>
+                <div style={s.settingsRow}>
+                  <label style={s.settingsLabel}>Voz</label>
+                  <select value={selectedVoice} onChange={(e) => { setSelectedVoice(e.target.value); tenantSet('jarvis_voice', e.target.value); }} style={{ ...s.configInput, flex: 1 }}>
+                    {VOICE_OPTIONS.map(v => <option key={v.key} value={v.key}>{v.label} - {v.desc}</option>)}
+                  </select>
+                </div>
+                <div style={s.settingsRow}>
+                  <label style={s.settingsLabel}>Velocidade: {voiceRate.toFixed(1)}x</label>
+                  <input type="range" min="0.5" max="3" step="0.1" value={voiceRate}
+                    onChange={(e) => { const rate = parseFloat(e.target.value); setVoiceRate(rate); tenantSet('jarvis_voice_rate', String(rate)); }}
+                    style={{ flex: 1 }} />
+                </div>
+                <div style={s.settingsRow}>
+                  <label style={s.settingsLabel}>Tom: {voicePitch}%</label>
+                  <input type="range" min="0" max="100" step="5" value={voicePitch}
+                    onChange={(e) => { const pitch = parseInt(e.target.value); setVoicePitch(pitch); tenantSet('jarvis_voice_pitch', String(pitch)); }}
+                    style={{ flex: 1 }} />
+                </div>
+              </div>
+
+              <div style={s.settingsSection}>
+                <div style={s.sectionTitle}>Instancia</div>
+                {instances.length > 0 ? (
+                  <div style={s.settingsRow}>
+                    <label style={s.settingsLabel}>Instancia</label>
+                    <select value={selectedInstanceId} onChange={(e) => {
+                      const id = e.target.value;
+                      setSelectedInstanceId(id);
+                      tenantSet('jarvis_instance_id', id);
+                      if (id) {
+                        const inst = instances.find(i => i.id === id);
+                        if (inst) { setSelectedModel(inst.model); setSelectedProvider(inst.provider); setInstanceConfig(inst); }
+                      } else { setInstanceConfig(null); }
+                    }} style={{ ...s.configInput, flex: 1 }}>
+                      <option value="">Padrao</option>
+                      {instances.map(inst => <option key={inst.id} value={inst.id}>{inst.name} ({inst.model})</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <div style={{ fontSize: 11, color: '#666' }}>Nenhuma instancia configurada.</div>
+                )}
+              </div>
+
+              <div style={{ fontSize: 10, color: '#555', marginTop: 8, borderTop: '1px solid #222', paddingTop: 8 }}>
+                Provedor ativo: {selectedProvider} | Modelo: {selectedModel}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -779,9 +815,6 @@ const s: Record<string, React.CSSProperties> = {
   modelSelect: { fontSize: 11, padding: '4px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 3, color: '#ccc' },
   modelSelectWide: { fontSize: 11, padding: '4px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 3, color: '#ccc', minWidth: 140 },
   settingsBtn: { background: 'none', border: '1px solid #333', color: '#ccc', fontSize: 12, cursor: 'pointer', padding: '2px 6px', borderRadius: 3 },
-  settingsPanel: { padding: '8px 12px', borderBottom: '1px solid #222', background: '#111', flexShrink: 0 },
-  configInput: { width: '100%', padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 4, color: '#ccc', fontSize: 11, boxSizing: 'border-box', outline: 'none' },
-  saveBtn: { padding: '3px 10px', background: '#00d9ff', border: 'none', borderRadius: 3, color: '#000', fontSize: 10, fontWeight: 600, cursor: 'pointer' },
   messagesArea: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 12, minHeight: 0 },
   emptyState: { color: '#666', textAlign: 'center', marginTop: 40, fontSize: 11 },
   inputSection: { padding: '0 12px 8px 12px', flexShrink: 0 },
@@ -792,6 +825,18 @@ const s: Record<string, React.CSSProperties> = {
   rightHeader: { padding: '8px 12px', borderBottom: '1px solid #222', flexShrink: 0 },
   messagesList: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 10, minHeight: 0 },
   rightFooter: { padding: '6px 12px', borderTop: '1px solid #222', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' },
+  modalContent: { background: '#0d0d1a', border: '1px solid #333', borderRadius: 12, width: '90%', maxWidth: 560, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
+  modalHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #222', flexShrink: 0 },
+  modalClose: { background: 'none', border: 'none', color: '#999', fontSize: 18, cursor: 'pointer', padding: '0 4px' },
+  modalBody: { padding: 16, overflowY: 'auto', flex: 1 },
+  settingsSection: { marginBottom: 16 },
+  sectionTitle: { fontSize: 12, fontWeight: 700, color: '#00d9ff', marginBottom: 8, borderBottom: '1px solid #222', paddingBottom: 4 },
+  settingsRow: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 },
+  settingsLabel: { fontSize: 11, color: '#999', minWidth: 100, flexShrink: 0 },
+  configInput: { flex: 1, padding: '6px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 4, color: '#ccc', fontSize: 11, outline: 'none', boxSizing: 'border-box' },
+  saveBtn: { padding: '4px 12px', background: '#00d9ff', border: 'none', borderRadius: 3, color: '#000', fontSize: 10, fontWeight: 600, cursor: 'pointer', flexShrink: 0 },
+  toggleBtn: { padding: '4px 14px', border: '1px solid #444', borderRadius: 4, fontSize: 11, fontWeight: 700, cursor: 'pointer', minWidth: 50, textAlign: 'center' as const },
 };
 
 export default JarvisPage;
