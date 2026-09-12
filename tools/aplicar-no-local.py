@@ -11,6 +11,7 @@ algum arquivo estivesse na lista de DIFERENTES, este script pararia.
 
 Uso: python tools/aplicar-no-local.py
 """
+import re
 import shutil
 import subprocess
 import sys
@@ -43,6 +44,46 @@ if not arquivos:
 arquivos = [a.strip() for a in arquivos.splitlines() if a.strip() and a.strip() not in EXCLUIR]
 
 print(f"Copiando {len(arquivos)} arquivos de DEEP-OS para DEEP-OS-LOCAL\n")
+
+# ── GUARDA: nao aplicar se houver DIVERGENCIA ────────────────────────────────
+#
+# O procedimento manda "se aparecer DIFERENTE, PARE e revise a mao". Isso
+# dependia da minha disciplina — e eu falhei: rodei o comparador, vi
+# "DIFERENTES: 1" e apliquei assim mesmo, porque o numero parecia inofensivo.
+# (Deu certo por sorte: o LOCAL estava ADIANTADO, nao divergente.)
+#
+# Regra que depende de disciplina vai ser quebrada. Agora a ferramenta RECUSA:
+# quem quiser insistir precisa passar --forcar de proposito.
+if "--forcar" not in sys.argv:
+    try:
+        comparador = Path(__file__).resolve().parent / "comparar-local.py"
+        saida = subprocess.run(
+            [sys.executable, str(comparador), BASE],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+        ).stdout or ""
+        m = re.search(r"DIFERENTES \(revisar um a um\) \.+ (\d+)", saida)
+        n_divergentes = int(m.group(1)) if m else 0
+        if n_divergentes > 0:
+            print("=" * 70)
+            print(f"ABORTADO: {n_divergentes} arquivo(s) DIFERENTE(S) entre os projetos.")
+            print("=" * 70)
+            print("\nCopiar agora poderia sobrescrever codigo proprio do gemeo.\n")
+            # Mostra quais sao, para o usuario decidir.
+            # Procura pelo TEXTO da marca, nao pelo travessao: o caractere
+            # especial da mensagem ja causou problema de encoding no console.
+            for linha in saida.splitlines():
+                if "codigo proprio" in linha or "DIFERENTE" in linha:
+                    print("   " + linha.strip())
+            print("\nRevise os arquivos acima. Se a diferenca for o LOCAL estar")
+            print("ADIANTADO (ja ter a mudanca), copiar e seguro.")
+            print("Para insistir: python tools/aplicar-no-local.py %s --forcar" % BASE)
+            sys.exit(2)
+        print(f"Guarda OK: nenhuma divergencia (0 DIFERENTE) — copia segura.\n")
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"AVISO: nao consegui rodar a guarda do comparador ({e}).")
+        print("       Siga o procedimento manualmente antes de copiar.\n")
 
 if not LOCAL.exists():
     print(f"ERRO: {LOCAL} nao existe")
