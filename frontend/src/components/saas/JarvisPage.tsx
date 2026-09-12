@@ -279,7 +279,23 @@ const JarvisPage: React.FC = () => {
 
   const speak = async (text: string) => {
     const voiceOpt = VOICE_OPTIONS.find(v => v.key === selectedVoice) || VOICE_OPTIONS[0];
-    const clean = text.replace(/\*\*/g, '').replace(/[#>*_`]/g, '').trim();
+    let clean = text
+      .replace(/\*\*/g, '')
+      .replace(/[#>*_`~\[\]{}|\\]/g, '')
+      .replace(/-{3,}/g, '')
+      .replace(/_{3,}/g, '')
+      .replace(/\.{3,}/g, '')
+      .replace(/•/g, '')
+      .replace(/sdkjf|ã|©|®|™|°/g, '')
+      .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
+      .replace(/[\u{2600}-\u{26FF}]/gu, '')
+      .replace(/[\u{2700}-\u{27BF}]/gu, '')
+      .replace(/[\u{FE00}-\u{FE0F}]/gu, '')
+      .replace(/[\u{200D}]/gu, '')
+      .replace(/[\u{20E3}]/gu, '')
+      .replace(/[\u{E0020}-\u{E007F}]/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (!clean) return;
     if (voiceOpt.type === 'edge') {
       try {
