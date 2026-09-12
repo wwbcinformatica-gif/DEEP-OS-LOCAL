@@ -1,8 +1,9 @@
-﻿# Modelos de IA (grandes demais para versionar)
+# Modelos de IA (grandes demais para versionar)
 *.gguf
 *.bin
+models/
 
-# DependÃªncias
+# Dependências
 node_modules/
 venv/
 __pycache__/
@@ -33,10 +34,10 @@ backend/config/api_keys.json
 # Se vazar, qualquer pessoa forja tokens validos e se passa por qualquer tenant.
 backend/config/jwt_secret.key
 
-# Pessoal (dados sensÃ­veis)
+# Pessoal (dados sensíveis)
 pessoal/
 
-# BinÃ¡rios do llama.cpp (baixar separadamente)
+# Binários do llama.cpp (baixar separadamente)
 bin/
 
 # Arquivos grandes
@@ -62,12 +63,12 @@ Thumbs.db
 
 data/plans.json
 
-# â”€â”€â”€ Arquivos locais com informacao sensivel â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+# ─── Arquivos locais com informacao sensivel ───────────────────────────────
 # Relatorios de diagnostico e logs de sessao podem conter senhas, chaves de
 # API e caminhos internos. NUNCA versionar.
-alteraÃ§Ãµes*.txt
+alterações*.txt
 alteracoes*.txt
-
+RECUPERAR-VPS.md
 *.secrets.txt
 
 # Arquivos perdidos/restaurados pelo editor
@@ -93,4 +94,3 @@ Modelfile
 # Scripts de verificacao pontual (nao fazem parte do projeto)
 verifica-*.cjs
 check-*.cjs
-

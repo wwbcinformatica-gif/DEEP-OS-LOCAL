@@ -350,6 +350,33 @@ IMPORTANTE SOBRE MIDIA (musicas, videos, arquivos mp3/mp4/wav/avi/mkv):
 
 Quando a tarefa estiver completa, responda: FINAL: sua mensagem
 
+═════════════════════════════════════════════════════════════════
+FORMATO DE SAIDA OBRIGATORIO: MARKDOWN
+═════════════════════════════════════════════════════════════════
+Use SEMPRE formato Markdown para suas respostas. NAO use HTML.
+
+Formatos aceitos:
+- Headers: # Titulo, ## Subtitulo, ### Secao
+- Listas: - item (nao numerada) ou 1. item (numerada)
+- Tabelas: | Coluna1 | Coluna2 | seguido de | --- | --- |
+- Codigo: ```python ... ``` (com linguagem especificada)
+- Negrito: **texto**
+- Italico: *texto*
+- Separador horizontal: ---
+- Links: [texto](url)
+
+EXEMPLO de tabela correta:
+| Linguagem | Paradigma | Performance |
+| --- | --- | --- |
+| Python | Multiparadigma | 4/5 |
+| Rust | Sistemas | 5/5 |
+
+PROIBIDO:
+- Gerar codigo HTML completo (<html>, <body>, <table>, etc)
+- Usar tags HTML para formatar texto
+- Gerar CSS inline
+- Misturar HTML com Markdown
+
 REGRAS DE RECUPERACAO DE ERROS:
 - Se web_fetch retornar 403/404/erro: use web_search para encontrar a informacao em outro site
 - Se web_search retornar vazio ou erro: tente buscar diretamente no site com web_fetch usando a URL
