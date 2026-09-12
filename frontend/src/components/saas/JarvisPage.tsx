@@ -122,6 +122,7 @@ const JarvisPage: React.FC = () => {
   const processListRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (activeConvId) {
@@ -332,6 +333,33 @@ const JarvisPage: React.FC = () => {
     setIsSpeaking(false);
   };
 
+  const stopGeneration = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    setIsTyping(false);
+    addProcess('info', 'Geracao interrompida pelo usuario', undefined);
+    setMessages(prev => {
+      const updated = [...prev];
+      const last = updated[updated.length - 1];
+      if (last && last.role === 'jarvis' && last.isStreaming) {
+        updated[updated.length - 1] = { ...last, isStreaming: false, content: last.content || 'Geracao interrompida.' };
+      }
+      return updated;
+    });
+  };
+
+  const clearMessages = () => {
+    setMessages([{
+      id: '1',
+      role: 'jarvis',
+      content: 'Ola! Sou o Jarvis, seu assistente inteligente. Como posso ajudar?',
+      timestamp: new Date(),
+    }]);
+    setProcessLog([]);
+  };
+
   const handleSendMessageDirect = async (text: string) => {
     if (!text.trim()) return;
 
@@ -361,8 +389,10 @@ const JarvisPage: React.FC = () => {
       const activeKey = selectedProvider === 'gemini' ? apiKey : (apiKeys[selectedProvider] || tenantGet(`${selectedProvider}_api_key`) || '');
       addProcess('info', `Conectando com ${selectedProvider}...`, `Modelo: ${selectedModel}`);
 
+      abortControllerRef.current = new AbortController();
       const resp = await fetch('/chat/stream', {
         method: 'POST',
+        signal: abortControllerRef.current.signal,
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
@@ -469,6 +499,7 @@ const JarvisPage: React.FC = () => {
       });
     }
 
+    abortControllerRef.current = null;
     setIsTyping(false);
   };
 
@@ -573,6 +604,9 @@ const JarvisPage: React.FC = () => {
               <span style={{ color: '#00d9ff', fontSize: 12 }}>{'\uD83E\uDD16'}</span>
               <span style={{ fontSize: 12, color: '#00d9ff', fontWeight: 600 }}>Jarvis</span>
               <button style={s.settingsBtn} onClick={() => setShowSettings(true)}>{'\u2699\uFE0F'}</button>
+              <button style={{ ...s.settingsBtn, color: isTyping ? '#ef4444' : '#666', borderColor: isTyping ? '#ef4444' : '#333' }} onClick={isTyping ? stopGeneration : clearMessages} title={isTyping ? 'Parar geracao' : 'Limpar chat'}>
+                {isTyping ? '\u23F9' : '\uD83D\uDDD1\uFE0F'}
+              </button>
             </div>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <select value={selectedProvider} onChange={(e) => { setSelectedProvider(e.target.value); const prov = PROVIDERS.find(p => p.id === e.target.value); if (prov && prov.models.length > 0) setSelectedModel(prov.models[0].id); }} style={s.modelSelect}>
