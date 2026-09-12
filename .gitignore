@@ -99,3 +99,6 @@ Modelfile
 # Scripts de verificacao pontual (nao fazem parte do projeto)
 verifica-*.cjs
 check-*.cjs
+
+# Backups locais antes de reescrever documentacao (nossos, nao versionados)
+backup-docs/

@@ -259,6 +259,44 @@ Modelos de audio tendem a "encher linguica" quando a instrucao deixa margem —
 por isso as proibicoes pesam tanto quanto o pedido. Coberto por
 `tests-manual/test_charon_barge_in.py`.
 
+### 7.3.2 ⚠️ Os DOIS paineis do Charon: não confundir, e não "melhorar" o direito
+
+O Charon tem dois paineis com finalidades **deliberadamente diferentes**. Isso
+foi uma decisão de projeto do usuário, não um acidente:
+
+| Painel | O que mostra | Formato | Pode mexer? |
+|--------|--------------|---------|-------------|
+| **Esquerdo (central)** | as **atividades**: ferramentas, buscas, listagens, resultados, documentos — *a entrega organizada do trabalho* | formatado, com links e Markdown | ✅ é aqui que se organiza e melhora |
+| **Direito** | a **transcrição da voz**, falante por falante | **empilhado**: cada pedaço do Gemini Live é uma entrada | ❌ **NÃO MEXER** |
+
+**Por que o direito é empilhado e por que isso é proposital.** O Gemini Live
+entrega a transcrição em **pedaços**, em tempo real, junto com o áudio. Cada
+pedaço vira uma entrada — por isso o painel parece uma pilha de frases curtas.
+
+Palavras do usuário:
+
+> *"é neste formato que funcionou empilhando as conversas, passamos vários dias
+> para descobrir que assim empilhado é melhor, não mexa neste formato"*
+
+> *"por isso eu pedi para ele entregar de forma organizada as respostas, os
+> projetos e listagem no painel central — por conta disso, para não mexer na
+> forma que ele recebe as informações e escuta"*
+
+Ou seja: **o painel central existe justamente para não precisar tocar no
+direito.** A organização vai para o central; o direito continua espelhando o
+fluxo do modelo, que é o que sustenta a escuta e o áudio.
+
+**A tentação a resistir:** juntar os pedaços do mesmo falante numa frase única.
+Parece uma melhoria óbvia — e eu tentei, por conta própria, inferindo do arquivo
+exportado. **Foi revertido.** Alterar como a transcrição é acumulada é mexer no
+caminho por onde as informações do modelo passam; o formato atual é o que
+funcionou depois de dias. Há aviso em `CharonPage.tsx` e em `chatStorage.ts`, e
+teste travando (`test_historico_conversa.py`, seção 11).
+
+**O download da sessão ("Baixar sessão") exporta os DOIS** — transcrição (direito)
+e atividades (central), em seções identificadas. É assim que se estuda ou arquiva
+uma sessão sem violar a regra acima.
+
 ### 7.4 Tools
 - `BASIC_TOOL_DECLARATIONS` (18) → `MEDIUM_TOOL_DECLARATIONS` (19) →
   `EXTRA_TOOL_DECLARATIONS` (8, so no toolset `full`) = **26 unicas**

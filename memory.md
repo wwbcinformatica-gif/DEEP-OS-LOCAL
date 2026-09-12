@@ -445,6 +445,29 @@ Leia ANTES de mexer em audio. Resumo do que mais morde:
   downsample `ratio 3`, `TURN_TAIL_GRACE_S 0.9`, playback a `24000 Hz`.
 - **O mic sobe ~16 kHz e o Charon desce 24 kHz.** PCM16 mono, sem cabecalho.
 - **Uma sessao por vez:** ao receber `start`, o backend encerra as outras.
+- **⚠️ OS DOIS PAINEIS TEM FORMATOS DIFERENTES DE PROPOSITO — nao unificar.**
+  - **Painel central (esquerdo)** = ATIVIDADES: ferramentas, buscas, listagens,
+    resultados, documentos. E a **entrega organizada** do trabalho, com Markdown
+    e links. E AQUI que se organiza e melhora.
+  - **Painel direito** = transcricao da voz, **EMPILHADA**: cada pedaco que o
+    Gemini Live manda vira uma entrada. Parece uma pilha de frases curtas — e
+    **e assim que tem que ser**.
+  - **NAO JUNTAR** os pedacos do mesmo falante numa frase unica. Eu tentei, por
+    conta propria, achando que era defeito; o usuario corrigiu: *"é neste formato
+    que funcionou empilhando as conversas, passamos vários dias para descobrir
+    que assim empilhado é melhor, não mexa neste formato"*.
+  - **Motivo (palavras do usuario):** *"por isso eu pedi para ele entregar de
+    forma organizada as respostas, os projetos e listagem no painel central —
+    para não mexer na forma que ele recebe as informações e escuta"*.
+  - Alterar o acumulo da transcricao e mexer no **caminho por onde as informacoes
+    do modelo passam** (o que sustenta a escuta e o audio). O painel central
+    existe justamente para nao precisar tocar no direito.
+  - Ha aviso nos dois arquivos de codigo, teste travando
+    (`test_historico_conversa.py`, secao 11) e detalhe em
+    [`docs/CHARON-VOZ.md`](docs/CHARON-VOZ.md) secao 7.3.2.
+- **Download da sessao** (`Baixar sessao`, no menu `...`): exporta os DOIS
+  paineis, em secoes identificadas. E o jeito de arquivar/estudar uma sessao sem
+  violar a regra acima.
 
 ## 🤖 ASSISTENTE LOCAL (RAG) — pergunta sobre o projeto offline
 **Documentacao: [`tools/README-RAG.md`](tools/README-RAG.md)**
