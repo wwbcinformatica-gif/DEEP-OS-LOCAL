@@ -148,30 +148,42 @@ function renderMarkdown(text: string): React.ReactNode {
       continue;
     }
 
-    // Table
-    if (trimmed.includes('|') && i + 1 < lines.length && lines[i + 1].trim().includes('---')) {
-      const headers = trimmed.split('|').map(c => c.trim()).filter(Boolean);
-      i += 2;
-      const rows: string[][] = [];
-      while (i < lines.length && lines[i].trim().includes('|') && !lines[i].trim().startsWith('```')) {
-        rows.push(lines[i].trim().split('|').map(c => c.trim()).filter(Boolean));
+    // Table - detect if current line has | and next non-empty line also has |
+    if (trimmed.includes('|') && !trimmed.startsWith('```')) {
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === '') j++;
+      const nextHasPipe = j < lines.length && lines[j].trim().includes('|') && !lines[j].trim().startsWith('```');
+      const isSeparator = j < lines.length && /^\s*\|?\s*[-:]+/.test(lines[j].trim()) && lines[j].trim().includes('|');
+      if (nextHasPipe || isSeparator) {
+        const headerLine = trimmed;
+        const headers = headerLine.split('|').map(c => c.trim()).filter(Boolean);
         i++;
+        const rows: string[][] = [];
+        while (i < lines.length && lines[i].trim().includes('|') && !lines[i].trim().startsWith('```')) {
+          const rowContent = lines[i].trim();
+          if (/^\s*\|?\s*[-:]+/.test(rowContent) && rowContent.includes('---')) { i++; continue; }
+          const cells = rowContent.split('|').map(c => c.trim()).filter(Boolean);
+          if (cells.length > 0) rows.push(cells);
+          i++;
+        }
+        if (headers.length > 0 && rows.length > 0) {
+          elements.push(
+            <div key={elements.length} style={{ margin: '8px 0', overflowX: 'auto', borderRadius: 6, border: '1px solid #2a2a3e' }}>
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: "'Cascadia Code', 'Fira Code', monospace" }}>
+                <thead><tr>{headers.map((h, hi) => (
+                  <th key={hi} style={{ padding: '6px 10px', background: '#16162a', borderBottom: '1px solid #2a2a3e', color: '#00d9ff', fontWeight: 700, textAlign: 'left', fontSize: 11 }}>{renderInline(h)}</th>
+                ))}</tr></thead>
+                <tbody>{rows.map((row, ri) => (
+                  <tr key={ri}>{row.map((cell, ci) => (
+                    <td key={ci} style={{ padding: '5px 10px', borderBottom: '1px solid #1a1a2e', color: '#ccc', background: ri % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>{renderInline(cell)}</td>
+                  ))}</tr>
+                ))}</tbody>
+              </table>
+            </div>
+          );
+          continue;
+        }
       }
-      elements.push(
-        <div key={elements.length} style={{ margin: '8px 0', overflowX: 'auto', borderRadius: 6, border: '1px solid #2a2a3e' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, fontFamily: "'Cascadia Code', 'Fira Code', monospace" }}>
-            <thead><tr>{headers.map((h, hi) => (
-              <th key={hi} style={{ padding: '6px 10px', background: '#16162a', borderBottom: '1px solid #2a2a3e', color: '#00d9ff', fontWeight: 700, textAlign: 'left', fontSize: 11 }}>{renderInline(h)}</th>
-            ))}</tr></thead>
-            <tbody>{rows.map((row, ri) => (
-              <tr key={ri}>{row.map((cell, ci) => (
-                <td key={ci} style={{ padding: '5px 10px', borderBottom: '1px solid #1a1a2e', color: '#ccc', background: ri % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent' }}>{renderInline(cell)}</td>
-              ))}</tr>
-            ))}</tbody>
-          </table>
-        </div>
-      );
-      continue;
     }
 
     // HR
@@ -324,14 +336,14 @@ const JarvisPage: React.FC = () => {
     const savedKey = tenantGet('saas_api_key') || '';
     setApiKey(savedKey);
     const keys: Record<string, string> = {};
-    ['gemini', 'openrouter', 'openai', 'groq', 'nvidia', 'mimo', 'openclaude', 'opencode'].forEach(p => {
+    ['gemini', 'openrouter', 'openai', 'groq', 'nvidia', 'mimo', 'openclaude', 'opencode', 'zhipu'].forEach(p => {
       const k = tenantGet(`${p}_api_key`) || '';
       if (k) keys[p] = k;
     });
     setApiKeys(keys);
     fetch('/api/config/api-keys').then(r => r.ok ? r.json() : null).then(data => {
       if (!data) return;
-      const envToField: Record<string, string> = { gemini: 'gemini', openrouter: 'openrouter', openai: 'openai', groq: 'groq', nvidia: 'nvidia', mimo: 'mimo', openclaude: 'openclaude', opencode: 'opencode' };
+      const envToField: Record<string, string> = { gemini: 'gemini', openrouter: 'openrouter', openai: 'openai', groq: 'groq', nvidia: 'nvidia', mimo: 'mimo', openclaude: 'openclaude', opencode: 'opencode', zhipu: 'zhipu' };
       Object.entries(envToField).forEach(([name, field]) => {
         if (data[name]?.has_key && !keys[field]) {
           keys[field] = '***saved***';
@@ -972,7 +984,7 @@ const JarvisPage: React.FC = () => {
                         const key = prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '');
                         if (prov.keyField === 'gemini') { tenantSet('saas_api_key', key); setApiKey(key); fetch('/api/config/api-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: key }) }).catch(() => {}); }
                         else { tenantSet(`${prov.keyField}_api_key`, key); setApiKeys({ ...apiKeys, [prov.keyField]: key }); }
-                        const envKeyMap: Record<string, string> = { gemini: 'GEMINI_API_KEY', openrouter: 'OPENROUTER_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', nvidia: 'NVIDIA_API_KEY', mimo: 'MIMO_API_KEY', openclaude: 'OPENCLAUDE_API_KEY', opencode: 'OPENCODE_API_KEY' };
+                        const envKeyMap: Record<string, string> = { gemini: 'GEMINI_API_KEY', openrouter: 'OPENROUTER_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', nvidia: 'NVIDIA_API_KEY', mimo: 'MIMO_API_KEY', openclaude: 'OPENCLAUDE_API_KEY', opencode: 'OPENCODE_API_KEY', zhipu: 'ZHIPU_API_KEY' };
                         const envPayload: Record<string, string> = {};
                         Object.keys(envKeyMap).forEach(pk => { envPayload[envKeyMap[pk]] = pk === 'gemini' ? (pk === prov.keyField ? key : (apiKeys['gemini'] || tenantGet('saas_api_key') || '')) : pk === prov.keyField ? key : (apiKeys[pk] || tenantGet(`${pk}_api_key`) || ''); });
                         fetch('/api/config/api-keys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envPayload) }).catch(() => {});
