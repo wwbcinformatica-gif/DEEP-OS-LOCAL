@@ -145,6 +145,17 @@ const JarvisPage: React.FC = () => {
       if (k) keys[p] = k;
     });
     setApiKeys(keys);
+    fetch('/api/config/api-keys').then(r => r.ok ? r.json() : null).then(data => {
+      if (!data) return;
+      const envToField: Record<string, string> = { gemini: 'gemini', openrouter: 'openrouter', openai: 'openai', groq: 'groq', nvidia: 'nvidia', mimo: 'mimo', openclaude: 'openclaude', opencode: 'opencode' };
+      Object.entries(envToField).forEach(([name, field]) => {
+        if (data[name]?.has_key && !keys[field]) {
+          keys[field] = '***saved***';
+          tenantSet(`${field}_api_key`, '***saved***');
+        }
+      });
+      setApiKeys({ ...keys });
+    }).catch(() => {});
     const savedInst = tenantGet('jarvis_instance_id') || '';
     fetch('/api/instances').then(r => r.ok ? r.json() : null).then(data => {
       if (data?.instances) {

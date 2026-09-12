@@ -86,69 +86,93 @@ def convert_to_multimodal(messages: list) -> list:
     return messages
 
 
+def _load_key_from_file(provider: str) -> str:
+    """Fallback: le chave de api_keys.json quando env var e override estao vazios."""
+    try:
+        import json
+        from pathlib import Path
+        cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+        if not cfg_path.exists():
+            return ""
+        data = json.loads(cfg_path.read_text(encoding="utf-8"))
+        key_map = {
+            "gemini": "gemini_api_key",
+            "groq": "groq_api_key",
+            "openrouter": "openrouter_api_key",
+            "openai": "openai_api_key",
+            "opencode": "opencode_api_key",
+            "nvidia": "nvidia_api_key",
+            "mimo": "mimo_api_key",
+            "openclaude": "openclaude_api_key",
+        }
+        return data.get(key_map.get(provider, ""), "")
+    except Exception:
+        return ""
+
+
 def get_client(provider: str, api_key_override: str = "", timeout_read: float = 120.0) -> AsyncOpenAI:
     timeout = Timeout(connect=10.0, read=timeout_read, write=10.0, pool=10.0)
     if provider == "ollama":
         return AsyncOpenAI(base_url="http://localhost:11434/v1", api_key="ollama", timeout=timeout)
     elif provider == "groq":
-        key = api_key_override or GROQ_API_KEY
+        key = api_key_override or GROQ_API_KEY or _load_key_from_file("groq")
         if not key:
-            raise ValueError("GROQ_API_KEY nao configurada. Crie backend/.env com GROQ_API_KEY=gsk_...")
+            raise ValueError("GROQ_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(base_url="https://api.groq.com/openai/v1", api_key=key, timeout=timeout)
     elif provider == "openrouter":
-        key = api_key_override or OPENROUTER_API_KEY
+        key = api_key_override or OPENROUTER_API_KEY or _load_key_from_file("openrouter")
         if not key:
-            raise ValueError("OPENROUTER_API_KEY nao configurada. Crie backend/.env com OPENROUTER_API_KEY=sk-or-...")
+            raise ValueError("OPENROUTER_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=key,
             timeout=timeout,
         )
     elif provider == "openai":
-        key = api_key_override or OPENAI_API_KEY
+        key = api_key_override or OPENAI_API_KEY or _load_key_from_file("openai")
         if not key:
-            raise ValueError("OPENAI_API_KEY nao configurada. Crie backend/.env com OPENAI_API_KEY=sk-...")
+            raise ValueError("OPENAI_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(api_key=key, timeout=timeout)
     elif provider == "gemini":
-        key = api_key_override or GEMINI_API_KEY
+        key = api_key_override or GEMINI_API_KEY or _load_key_from_file("gemini")
         if not key:
-            raise ValueError("GEMINI_API_KEY nao configurada. Crie backend/.env com GEMINI_API_KEY=AIza...")
+            raise ValueError("GEMINI_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url="https://generativelanguage.googleapis.com/v1beta/openai/",
             api_key=key,
             timeout=timeout,
         )
     elif provider == "opencode":
-        key = api_key_override or OPENCODE_API_KEY
+        key = api_key_override or OPENCODE_API_KEY or _load_key_from_file("opencode")
         if not key:
-            raise ValueError("OPENCODE_API_KEY nao configurada. Crie backend/.env com OPENCODE_API_KEY=oc_...")
+            raise ValueError("OPENCODE_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url="https://opencode.ai/zen/v1",
             api_key=key,
             timeout=timeout,
         )
     elif provider == "nvidia":
-        key = api_key_override or NVIDIA_API_KEY
+        key = api_key_override or NVIDIA_API_KEY or _load_key_from_file("nvidia")
         if not key:
-            raise ValueError("NVIDIA_API_KEY nao configurada. Crie backend/.env com NVIDIA_API_KEY=nvapi-...")
+            raise ValueError("NVIDIA_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url="https://integrate.api.nvidia.com/v1",
             api_key=key,
             timeout=timeout,
         )
     elif provider == "openclaude":
-        key = api_key_override or OPENCLAUDE_API_KEY
+        key = api_key_override or OPENCLAUDE_API_KEY or _load_key_from_file("openclaude")
         if not key:
-            raise ValueError("OPENCLAUDE_API_KEY nao configurada. Crie backend/.env com a chave do seu servidor OpenClaude")
+            raise ValueError("OPENCLAUDE_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url=OPENCLAUDE_BASE_URL,
             api_key=key,
             timeout=timeout,
         )
     elif provider == "mimo":
-        key = api_key_override or MIMO_API_KEY
+        key = api_key_override or MIMO_API_KEY or _load_key_from_file("mimo")
         if not key:
-            raise ValueError("MIMO_API_KEY nao configurada. Crie backend/.env com MIMO_API_KEY=sk-...")
+            raise ValueError("MIMO_API_KEY nao configurada. Salve no Jarvis > Configuracoes > Chaves de API.")
         return AsyncOpenAI(
             base_url="https://api.xiaomimimo.com/v1",
             api_key=key,
@@ -319,9 +343,8 @@ async def stream_chat(
     api_key: str = "",
 ):
     if provider == "llamacpp":
-        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = await asyncio.to_thread(ensure_llamacpp_model, model)
+        status = ensure_llamacpp_model(model)
         if status.get("error"):
             yield f"ERR: {status['error']}"
             return
@@ -382,9 +405,8 @@ async def complete_chat(
     api_key: str = "",
 ) -> str:
     if provider == "llamacpp":
-        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = await asyncio.to_thread(ensure_llamacpp_model, model)
+        status = ensure_llamacpp_model(model)
         if status.get("error"):
             return f"ERR: {status['error']}"
     messages = truncate_messages(messages)
@@ -650,9 +672,8 @@ async def stream_chat_with_tools(
     api_key: str = "",
 ):
     if provider == "llamacpp":
-        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = await asyncio.to_thread(ensure_llamacpp_model, model)
+        status = ensure_llamacpp_model(model)
         if status.get("error"):
             yield {"type": "content", "data": f"ERR: {status['error']}"}
             return
@@ -777,9 +798,8 @@ async def complete_chat_with_tools(
     api_key: str = "",
 ) -> dict:
     if provider == "llamacpp":
-        import asyncio
         from routes.llamacpp_route import ensure_llamacpp_model
-        status = await asyncio.to_thread(ensure_llamacpp_model, model)
+        status = ensure_llamacpp_model(model)
         if status.get("error"):
             return {"type": "content", "data": f"ERR: {status['error']}", "reasoning": ""}
     messages = truncate_messages(messages)
