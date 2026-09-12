@@ -396,6 +396,27 @@ TASK_KEYWORDS = [
     "mapeie", "mapear",
     "explore", "explorar",
     "investigue", "investigar",
+
+    # ── Perguntas de INSPECAO DO SISTEMA ─────────────────────────────────────
+    #
+    # BUG RELATADO: "voce sabe em qual ambiente voce esta sendo executado?"
+    #
+    # A lista acima so tinha VERBOS DE ACAO ("liste", "mostre", "execute"). Uma
+    # pergunta assim nao casava com nada, entao o DEEP-OS classificava como
+    # conversa simples e NAO OFERECIA FERRAMENTA NENHUMA. Sem ferramentas, o
+    # modelo nao tinha como executar — e escrevia a chamada como TEXTO
+    # (`<tool_code> print(bash("uname -a")) ...`), que nunca rodava. O usuario
+    # via o plano, o checklist marcado, e nada acontecia.
+    #
+    # Estas palavras cobrem o vocabulario de quem quer SABER do sistema, nao
+    # pedir uma acao — e sao exatamente as que exigem ler a maquina.
+    "ambiente", "sistema", "sistema operacional", "kernel", "distribuicao",
+    "hostname", "hardware", "processador", "cpu", "memoria", "ram",
+    "disco", "espaco em disco", "armazenamento", "gpu", "placa de video",
+    "container", "docker", "maquina", "servidor", "vps", "onde voce",
+    "esta rodando", "esta sendo executado", "rodando em", "executado em",
+    "quem sou eu", "qual usuario", "usuario atual", "diretorio atual",
+    "arquitetura", "versao do", "quanto de", "quanta memoria",
 ]
 
 NO_TOOL_MODELS = {"llava", "bakllava", "moondream", "minicpm-v", "qwen-vl", "qwen2-vl", "qwen-vl-plus", "qwen2.5-vl", "qwen2.5vl"}

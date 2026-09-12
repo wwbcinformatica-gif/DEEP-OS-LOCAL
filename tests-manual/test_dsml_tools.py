@@ -342,6 +342,84 @@ check("limpar_markup_dsml" in texto_chat,
       "o texto final continua com markup (é o que fica na tela)")
 
 print()
+print("=== 12. Pergunta de inspecao do sistema precisa ATIVAR as ferramentas ===")
+# BUG RELATADO: "voce sabe em qual ambiente voce esta sendo executado?"
+# A lista de gatilhos so tinha VERBOS DE ACAO. Uma pergunta assim nao casava,
+# entao o DEEP-OS tratava como conversa simples e NAO OFERECIA ferramenta. Sem
+# ferramentas o modelo escrevia a chamada como TEXTO (`<tool_code>`) e nada
+# rodava — o usuario via o checklist marcado e o plano parado.
+from routes.chat import is_task_message  # noqa: E402
+
+DEVEM_SER_TAREFA = [
+    "voce sabe em qual ambiente voce esta sendo executado ?",
+    "qual o sistema operacional?",
+    "voce tem quanta memoria ram?",
+    "esta rodando em container?",
+    "quanta memoria livre tem?",
+    "qual o espaco em disco",
+    "qual a versao do kernel",
+    "tem gpu nessa maquina?",
+]
+for txt in DEVEM_SER_TAREFA:
+    check(is_task_message(txt) is True, f"tarefa: {txt!r}", f"NAO classificou como tarefa: {txt!r}")
+
+# E conversa normal NAO pode virar tarefa (senao liga ferramenta sem motivo)
+CONVERSA = ["ola tudo bem?", "me conte uma piada", "quem foi albert einstein",
+            "obrigado!", "bom dia"]
+for txt in CONVERSA:
+    check(is_task_message(txt) is False, f"conversa: {txt!r}",
+          f"classificou conversa como tarefa: {txt!r}")
+
+print()
+print("=== 13. Bloco <tool_code> (formato que o Gemini improvisa) ===")
+from core.llm_native import extrair_tool_code  # noqa: E402
+
+# Exemplo REAL do print do usuario (varias chamadas num bloco)
+bloco = (
+    "<tool_code>\n"
+    'print(bash("uname -a"))\n'
+    'print(bash("hostname"))\n'
+    'print(bash("free -h"))\n'
+    "</tool_code>"
+)
+calls = extrair_tool_code(bloco)
+check(len(calls) == 3, f"extraiu as 3 chamadas do bloco (veio {len(calls)})",
+      f"devia extrair 3, extraiu {len(calls)}")
+if calls:
+    nomes = [c["function"]["name"] for c in calls]
+    check(all(n == "bash" for n in nomes), "todas sao 'bash'", f"nomes: {nomes}")
+    args = [json.loads(c["function"]["arguments"]) for c in calls]
+    cmds = [a.get("command") for a in args]
+    check("uname -a" in cmds and "free -h" in cmds,
+          f"os comandos foram preservados: {cmds}",
+          f"comandos perdidos: {cmds}")
+    check(len(set(c["id"] for c in calls)) == 3, "cada chamada tem id proprio",
+          "ids repetidos")
+
+# Comando com quebra de linha (como no print do usuario) vira uma linha so
+quebrado = '<tool_code>\nprint(bash("cat /etc/os-release 2>/dev/null\n|| echo N/A"))\n</tool_code>'
+cq = extrair_tool_code(quebrado)
+check(len(cq) == 1, "comando com quebra de linha ainda e 1 chamada",
+      f"extraiu {len(cq)}")
+if cq:
+    cmd = json.loads(cq[0]["function"]["arguments"]).get("command", "")
+    check("\n" not in cmd, "a quebra de linha foi normalizada",
+          f"o comando ficou com quebra de linha: {cmd!r}")
+
+# SEGURANCA: `bash(...)` FORA de um bloco tool_code NAO pode ser executado —
+# pode ser apenas um exemplo dentro de uma explicacao.
+explicacao = 'Para listar use bash("ls -la") no terminal.'
+check(extrair_tool_code(explicacao) == [],
+      "bash(...) fora de <tool_code> NAO vira execucao",
+      "executaria um comando citado apenas como exemplo numa explicacao")
+
+# E o extrator geral precisa usar o tool_code antes do generico (que devolveria
+# so a primeira chamada)
+multi = extrair_tools_do_texto(bloco)
+check(len(multi) == 3, "extrair_tools_do_texto devolve as 3 (nao so a primeira)",
+      f"devolveu {len(multi)} — o extrator generico so pega a primeira")
+
+print()
 print("=" * 70)
 if falhas:
     print(f"RESULTADO: {len(falhas)} FALHA(S)")

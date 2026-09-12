@@ -736,6 +736,53 @@ class FiltroDSML:
         return resto
 
 
+def extrair_tool_code(texto: str) -> list:
+    """
+    Extrai chamadas de um bloco `<tool_code>` (formato que o Gemini improvisa).
+
+    Quando o modelo NAO recebe ferramentas, alguns (Gemini, sobretudo) escrevem
+    a intencao como pseudo-codigo:
+
+        <tool_code>
+        print(bash("uname -a"))
+        print(bash("free -h"))
+        </tool_code>
+
+    O extrator generico ja reconhece `bash("...")`, MAS devolve so a PRIMEIRA
+    chamada — e aqui costuma haver varias (uma por comando). Este extrator pega
+    todas, para o bloco inteiro ser executado.
+
+    So age em conteudo dentro de `<tool_code>`: fora dele, um `bash("...")` pode
+    ser apenas um exemplo numa explicacao, e executar isso seria perigoso.
+    """
+    if not texto or "tool_code" not in texto:
+        return []
+
+    chamadas = []
+    for bloco in re.findall(r"<tool_code>(.*?)</tool_code>", texto, re.DOTALL):
+        # `bash("cmd")`, `read("path")`, etc. — o nome entre parenteses define o
+        # parametro esperado por cada ferramenta.
+        padrao = r"(bash|read|write|explorer|search|glob|delete|rename|create_directory|file_edit)\s*\(\s*[\"'](.+?)[\"']\s*\)"
+        for nome, valor in re.findall(padrao, bloco, re.DOTALL):
+            chave = (
+                "command" if nome == "bash"
+                else "path" if nome in ("read", "explorer", "delete", "create_directory")
+                else "pattern" if nome == "glob"
+                else "query" if nome == "search"
+                else "content"
+            )
+            valor = valor.strip()
+            # Os comandos vem com quebras de linha do `print(...)`; o shell
+            # aceita, mas normalizar evita comando colado/quebrado.
+            valor = re.sub(r"\s*\n\s*", " ", valor)
+            chamadas.append({
+                "id": f"tc_{abs(hash(nome + valor + str(len(chamadas)))) % 100000}",
+                "type": "function",
+                "function": {"name": nome, "arguments": json.dumps({chave: valor}, ensure_ascii=False)},
+            })
+    return chamadas
+
+
 def extrair_tools_do_texto(texto: str) -> list:
     """
     Extrai tool calls emitidas como texto, cobrindo TODOS os formatos conhecidos.
@@ -752,6 +799,11 @@ def extrair_tools_do_texto(texto: str) -> list:
     if not texto:
         return []
     chamadas = extrair_dsml(texto)
+    if chamadas:
+        return chamadas
+    # Bloco <tool_code> (formato improvisado pelo Gemini): pode trazer VARIAS
+    # chamadas, e o extrator generico so devolveria a primeira.
+    chamadas = extrair_tool_code(texto)
     if chamadas:
         return chamadas
     unica = _extract_tool_from_text(texto)
