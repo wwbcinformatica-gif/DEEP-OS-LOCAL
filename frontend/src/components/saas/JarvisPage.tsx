@@ -99,13 +99,13 @@ const PROVIDERS = [
     { id: 'glm-4v-flash', label: 'GLM-4V-Flash (visao)' },
   ]},
   { id: 'nvidia', label: 'NVIDIA NIM', keyField: 'nvidia', models: [
-    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
-    { id: 'nvidia/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
-    { id: 'nvidia/llama-3.1-8b-instruct', label: 'Llama 3.1 8B' },
-    { id: 'nvidia/mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
-    { id: 'nvidia/gemma-2-9b-it', label: 'Gemma 2 9B' },
-    { id: 'nvidia/phi-3-medium-4k-instruct', label: 'Phi-3 Medium 4K' },
-    { id: 'nvidia/codellama-34b-instruct', label: 'CodeLlama 34B' },
+    { id: 'llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
+    { id: 'llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+    { id: 'llama-3.1-8b-instruct', label: 'Llama 3.1 8B' },
+    { id: 'mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
+    { id: 'gemma-2-9b-it', label: 'Gemma 2 9B' },
+    { id: 'phi-3-medium-4k-instruct', label: 'Phi-3 Medium 4K' },
+    { id: 'codellama-34b-instruct', label: 'CodeLlama 34B' },
   ]},
 ];
 
