@@ -56,7 +56,7 @@ const PROVIDERS = [
   { id: 'ollama', label: 'Ollama (local)', keyField: '', models: [], dynamic: true },
   { id: 'llamacpp', label: 'llama.cpp (GGUF local)', keyField: '', models: [], dynamic: true },
   { id: 'gemini', label: 'Google Gemini', keyField: 'gemini', models: [
-    { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash' },
+    { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
     { id: 'gemini-2.5-flash-preview-04-17', label: 'Gemini 2.5 Flash Preview' },
     { id: 'gemini-2.5-pro-preview-05-06', label: 'Gemini 2.5 Pro Preview' },
     { id: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash' },
@@ -81,11 +81,10 @@ const PROVIDERS = [
   { id: 'groq', label: 'Groq (gratis/rapido)', keyField: 'groq', models: [
     { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile' },
     { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
-    { id: 'llama-3.2-3b-preview', label: 'Llama 3.2 3B Preview' },
-    { id: 'llama-3.2-11b-vision-preview', label: 'Llama 3.2 11B Vision' },
-    { id: 'llama-3.2-90b-vision-preview', label: 'Llama 3.2 90B Vision' },
-    { id: 'gemma2-9b-it', label: 'Gemma 2 9B' },
-    { id: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B' },
+    { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+    { id: 'qwen/qwen3.6-27b', label: 'Qwen 3.6 27B' },
+    { id: 'minimaxai/minimax-m2.7', label: 'MiniMax M2.7' },
   ]},
   { id: 'mimo', label: 'MiMo', keyField: 'mimo', models: [
     { id: 'mimo-v2.5', label: 'MiMo V2.5' },
@@ -101,11 +100,9 @@ const PROVIDERS = [
   { id: 'nvidia', label: 'NVIDIA NIM', keyField: 'nvidia', models: [
     { id: 'llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
     { id: 'llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
-    { id: 'llama-3.1-8b-instruct', label: 'Llama 3.1 8B' },
     { id: 'mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
     { id: 'gemma-2-9b-it', label: 'Gemma 2 9B' },
     { id: 'phi-3-medium-4k-instruct', label: 'Phi-3 Medium 4K' },
-    { id: 'codellama-34b-instruct', label: 'CodeLlama 34B' },
   ]},
 ];
 
