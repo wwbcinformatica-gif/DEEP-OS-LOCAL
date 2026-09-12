@@ -239,6 +239,58 @@ check("nao apaga nenhuma conversa do historico" in jarvis,
       "o '+' nao avisa que nao apaga o historico")
 
 print()
+print("=== 8. Limpar tudo: local + servidor (com as travas certas) ===")
+# Pedido: "todos os contexto de teste nao e relevante, pode deixar tudo limpo
+# para criar os historicos do zero".
+storage = STORAGE.read_text(encoding="utf-8")
+janela = jarvis
+
+check("export function limparHistoricoLocal" in storage,
+      "existe limparHistoricoLocal()", "nao ha como limpar as conversas locais")
+# NAO pode usar localStorage.clear(): apagaria token, chave de API, voz e tema
+m_limp = re.search(r"export function limparHistoricoLocal\(\): number \{(.*?)\n\}", storage, re.S)
+corpo_limp = m_limp.group(1) if m_limp else ""
+check("localStorage.clear" not in corpo_limp,
+      "NAO usa localStorage.clear() (preserva token, chave, voz e tema)",
+      "usa localStorage.clear() — deslogaria o usuario e perderia configuracoes")
+check("messages_" in corpo_limp and "transcripts_" in corpo_limp and "activity_" in corpo_limp,
+      "remove as chaves de conversa (mensagens, transcricoes, atividade)",
+      "nao remove todas as chaves de conversa, ou remove de menos")
+
+# O endpoint do servidor precisa ser alcancavel pelo nginx
+BACKEND = RAIZ / "backend"
+HIST = BACKEND / "routes" / "history.py"
+SEG = BACKEND / "middleware" / "security.py"
+hist = HIST.read_text(encoding="utf-8")
+seg = SEG.read_text(encoding="utf-8")
+
+check('@router.delete("/api/history")' in hist,
+      "existe DELETE /api/history (alcancavel pelo nginx)",
+      "so existe /history, que o nginx NAO encaminha — cairia no HTML do frontend")
+check('"/api/history"' in seg,
+      "a rota destrutiva esta protegida pelo middleware",
+      "/api/history NAO esta em PREFIXOS_PROTEGIDOS — qualquer um apagaria o historico")
+check("fetch('/api/history'" in janela,
+      "o frontend chama /api/history (e nao /history)",
+      "o frontend chama um caminho que o nginx nao encaminha — falso sucesso")
+
+# A verificacao de que a resposta veio do backend
+check("j.status === 'ok'" in janela,
+      "o frontend confirma que a resposta veio do BACKEND",
+      "sem confirmar o JSON, um HTML do nginx (200) seria lido como sucesso")
+check("NAO confirmou a limpeza" in janela,
+      "ha mensagem clara quando a limpeza nao e confirmada",
+      "o usuario nao saberia que o contexto antigo continua ativo")
+
+# Precisa de confirmacao antes de apagar (acao irreversivel)
+check("Apagar TODAS as conversas?" in janela,
+      "pede confirmacao antes de apagar (acao irreversivel)",
+      "apaga sem confirmar")
+check("NAO remove: sua conta" in janela,
+      "a confirmacao explica o que NAO e removido",
+      "a confirmacao nao tranquiliza sobre o que fica")
+
+print()
 print("=" * 70)
 if falhas:
     print(f"RESULTADO: {len(falhas)} FALHA(S)")

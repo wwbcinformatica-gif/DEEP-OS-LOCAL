@@ -70,6 +70,41 @@ export function tenantRemove(key: string): void {
   localStorage.removeItem(`${getTenantId()}_${key}`);
 }
 
+/**
+ * Apaga TODAS as conversas do tenant (local) e devolve quantas chaves removeu.
+ *
+ * PEDIDO DO USUARIO: "todos os contexto de teste nao e relevante, pode deixar
+ * tudo limpo para criar os historicos do zero".
+ *
+ * CUIDADO DELIBERADO: remove APENAS as chaves de conversa
+ * (`chat_conversations`, `messages_*`, `transcripts_*`, `activity_*`).
+ * NAO usa `localStorage.clear()`, que apagaria tambem `saas_token`,
+ * `saas_api_key`, `jarvis_voice`, o tema e o workspace escolhido — ou seja,
+ * deslogaria o usuario e perderia as configuracoes dele.
+ *
+ * E nao precisa limpar cache do navegador: o dado e do proprio tenant, e some
+ * de forma cirurgica.
+ */
+export function limparHistoricoLocal(): number {
+  const prefixo = `${getTenantId()}_`;
+  const alvos: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith(prefixo)) continue;
+    const resto = k.slice(prefixo.length);
+    if (
+      resto === CONVERSATIONS_KEY ||
+      resto.startsWith('messages_') ||
+      resto.startsWith('transcripts_') ||
+      resto.startsWith('activity_')
+    ) {
+      alvos.push(k);
+    }
+  }
+  for (const k of alvos) localStorage.removeItem(k);
+  return alvos.length;
+}
+
 // ─── Conversations ───────────────────────────────────────────────
 
 const CONVERSATIONS_KEY = 'chat_conversations';

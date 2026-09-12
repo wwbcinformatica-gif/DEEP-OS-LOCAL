@@ -4,7 +4,7 @@ import {
   getConversations, createConversation, renameConversation, deleteConversation,
   getTranscripts, saveTranscripts, getActivityLog, saveActivityLog,
   getMessages, saveMessages, conversationToMarkdown, baixarTexto,
-  getWorkspaces, setConversationWorkspace, WORKSPACE_PADRAO,
+  getWorkspaces, setConversationWorkspace, WORKSPACE_PADRAO, limparHistoricoLocal,
   tenantGet, tenantSet,
 } from './chatStorage';
 
@@ -1448,6 +1448,82 @@ const JarvisPage: React.FC = () => {
                     </div>
                   );
                 })}
+
+                {/* Limpar tudo: apaga as conversas (local) E o historico que o
+                    servidor usa como contexto. Fica no fim da lista, discreto,
+                    com confirmacao — e explica que NAO desloga nem perde
+                    configuracoes, que e a duvida natural antes de clicar. */}
+                {conversations.length > 0 && (
+                  <div style={{ borderTop: '1px solid #222', marginTop: 4, paddingTop: 4 }}>
+                    <div
+                      onClick={async () => {
+                        if (!confirm(
+                          'Apagar TODAS as conversas?\n\n' +
+                          'Isso remove:\n' +
+                          '  - as conversas salvas neste navegador\n' +
+                          '  - o historico que o Jarvis usa como contexto no servidor\n\n' +
+                          'NAO remove: sua conta, a chave de API, a voz escolhida nem o workspace.\n\n' +
+                          'Esta acao nao pode ser desfeita.'
+                        )) return;
+                        // 1. Servidor: zera o historico de contexto (por tenant)
+                        try {
+                          // `/api/history`, e nao `/history`: o nginx de
+                          // producao so encaminha /api/ /auth/ /chat/ /voice/
+                          // /admin/ /ws/ — `/history` cairia no HTML do
+                          // frontend e voltaria 200 SEM ter apagado nada.
+                          const token = tenantGet('saas_token') || localStorage.getItem('saas_token');
+                          const r = await fetch('/api/history', {
+                            method: 'DELETE',
+                            headers: authHeaders(),
+                          });
+                          if (r.status === 401) {
+                            addProcess('tool_error', 'Sessao expirada — o historico do servidor NAO foi limpo', 'Faca login de novo e repita.', 'error');
+                          } else if (!r.ok) {
+                            addProcess('tool_error', `Servidor respondeu ${r.status} ao limpar o historico`, undefined, 'error');
+                          } else {
+                            // Confere que a resposta veio do BACKEND e nao do
+                            // nginx devolvendo o HTML do frontend (o que
+                            // aconteceria com um caminho nao encaminhado). Sem
+                            // esta checagem a tela diria "limpo" com o historico
+                            // intacto.
+                            const j = await r.json().catch(() => null);
+                            if (j && j.status === 'ok') {
+                              addProcess('info', 'Historico do servidor limpo');
+                            } else {
+                              addProcess(
+                                'tool_error',
+                                'O servidor NAO confirmou a limpeza do historico',
+                                'A resposta nao veio do backend. O contexto antigo pode continuar ativo.',
+                                'error',
+                              );
+                            }
+                          }
+                          void token;
+                        } catch (e: any) {
+                          addProcess('tool_error', `Falha ao limpar o historico do servidor: ${e?.message || 'rede'}`, undefined, 'error');
+                        }
+                        // 2. Local: conversas deste navegador
+                        const removidas = limparHistoricoLocal();
+                        addProcess('info', 'Conversas locais apagadas', `${removidas} registro(s)`);
+                        // 3. Volta ao estado inicial limpo
+                        setConversations([]);
+                        setTodosWorkspaces([WORKSPACE_PADRAO]);
+                        setActiveConvId('');
+                        setMessages([{
+                          id: '1',
+                          role: 'jarvis' as const,
+                          content: 'Ola! Sou o Jarvis, seu assistente inteligente. Posso ouvir voce, executar tarefas e usar ferramentas. Como posso ajudar?',
+                          timestamp: new Date(),
+                        }]);
+                        setProcessLog([]);
+                        setShowConvMenu(false);
+                      }}
+                      style={{ fontSize: 10, padding: '4px 8px', cursor: 'pointer', color: '#a55', borderRadius: 3 }}
+                    >
+                      {'\u2715'} Limpar tudo (conversas + contexto do servidor)
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>

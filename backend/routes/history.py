@@ -40,3 +40,23 @@ async def clear_history():
     conn.commit()
     conn.close()
     return {"status": "ok", "message": "Histórico limpo"}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Mesma operação sob /api/ — POR QUE EXISTE
+#
+# O nginx de producao encaminha ao backend apenas os prefixos:
+#     /api/  /auth/  /chat/  /voice/  /admin/  /ws/
+# Qualquer outro caminho cai no `location /`, que devolve o HTML do frontend.
+#
+# Entao um `DELETE /history` vindo do NAVEGADOR nao chega no backend: recebe o
+# index.html com HTTP 200. O frontend veria "sucesso" sem nada ter sido apagado —
+# um falso positivo silencioso, do mesmo tipo que ja custou tempo neste projeto.
+#
+# (Localmente funciona, porque o Vite faz proxy e o middleware libera o Host
+# local — ou seja, o bug SO apareceria em producao. Por isso a rota duplicada.)
+# ─────────────────────────────────────────────────────────────────────────────
+@router.delete("/api/history")
+async def clear_history_api():
+    """Limpa o historico do tenant atual (rota alcancavel via nginx)."""
+    return await clear_history()

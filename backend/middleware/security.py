@@ -82,6 +82,10 @@ PREFIXOS_PROTEGIDOS = (
     "/api/plugins",
     "/api/monitor",
     "/api/tools",
+    # DESTRUTIVA: apaga o historico de contexto do tenant. Precisa de auth tanto
+    # quanto as rotas de leitura acima — foi adicionada junto com a rota
+    # `/api/history` (a `/history`, sem o prefixo, nao passa pelo nginx).
+    "/api/history",
     # --- defesa em profundidade (so acessiveis localmente) ---
     "/secrets",
     "/logs",
