@@ -78,6 +78,8 @@ TESTES = [
      "TODOS OS TESTES PASSARAM"),
     ("test_voz_jarvis.py", "Voz do Jarvis: texto para fala e barras de velocidade/tom",
      "TODOS OS TESTES PASSARAM"),
+    ("test_historico_conversa.py", "Historico: mensagens salvas, restauradas e exportaveis",
+     "TODOS OS TESTES PASSARAM"),
     ("audit_headless_tools.py", "Auditoria: quais tools carregam (headless)",
      "NAO importam/carregam: 0"),
 ]

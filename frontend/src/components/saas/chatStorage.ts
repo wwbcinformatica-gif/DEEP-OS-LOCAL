@@ -124,6 +124,106 @@ export function saveActivityLog(convId: string, entries: TranscriptEntry[]): voi
   tenantSet(`activity_${convId}`, JSON.stringify(entries.slice(-150)));
 }
 
+// ─── Mensagens do chat por conversa ──────────────────────────────
+//
+// BUG RELATADO: "ao clicar no historico nao volta para o historico, nao aparece
+// nenhuma informacao do historico salvo".
+//
+// CAUSA: estas duas funcoes NAO EXISTIAM. O projeto salvava apenas os
+// `transcripts` (o log de VOZ do Charon). As mensagens do chat do Jarvis nunca
+// eram gravadas em lugar nenhum — a conversa era criada e batizada com o texto
+// da primeira mensagem, mas o CONTEUDO dela se perdia ao recarregar a pagina.
+// Nao havia historico para mostrar porque ele nunca foi salvo.
+export interface ChatMessageStored {
+  id: string;
+  role: 'user' | 'jarvis';
+  content: string;
+  /** ISO string: o tipo Date nao sobrevive ao JSON. */
+  timestamp: string;
+}
+
+export function getMessages(convId: string): ChatMessageStored[] {
+  try {
+    const raw = tenantGet(`messages_${convId}`);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveMessages(convId: string, mensagens: ChatMessageStored[]): void {
+  try {
+    // Limite de 200 mensagens: o localStorage tem poucos MB e uma conversa
+    // longa com respostas grandes estoura a cota (o tenantSet captura o erro,
+    // mas ai a gravacao para de funcionar em silencio).
+    tenantSet(`messages_${convId}`, JSON.stringify(mensagens.slice(-200)));
+  } catch {
+    /* cota cheia: nao derruba o chat por causa do historico */
+  }
+}
+
+/**
+ * Texto da conversa em Markdown, para exportar/estudar.
+ *
+ * Existe a pedido do usuario: "colocar um download no historico para salvar o
+ * estudo ou pesquisa". O formato escolhido e Markdown porque abre legivel em
+ * qualquer editor, cola bem em anotacoes e nao depende de programa nenhum.
+ */
+export function conversationToMarkdown(
+  convId: string,
+  nome: string,
+): string {
+  const msgs = getMessages(convId);
+  if (msgs.length === 0) return '';
+
+  const quando = new Date().toLocaleString('pt-BR');
+  const linhas: string[] = [
+    `# ${nome || 'Conversa'}`,
+    '',
+    `_Exportado do DEEP-OS em ${quando} — ${msgs.length} mensagens_`,
+    '',
+    '---',
+    '',
+  ];
+
+  for (const m of msgs) {
+    const hora = new Date(m.timestamp).toLocaleString('pt-BR');
+    const quem = m.role === 'user' ? 'Voce' : 'Jarvis';
+    linhas.push(`## ${quem} — ${hora}`, '', m.content, '');
+  }
+
+  // Os transcripts de voz (Charon) entram como anexo quando existirem
+  const transcricoes = getTranscripts(convId);
+  if (transcricoes.length > 0) {
+    linhas.push('---', '', '## Transcricao de voz', '');
+    for (const t of transcricoes) {
+      linhas.push(`- **${t.speaker === 'user' ? 'Voce' : 'Charon'}** (${t.time}): ${t.text}`);
+    }
+    linhas.push('');
+  }
+
+  return linhas.join('\n');
+}
+
+/** Dispara o download de um texto como arquivo .md */
+export function baixarTexto(nomeArquivo: string, conteudo: string): void {
+  const blob = new Blob([conteudo], { type: 'text/markdown;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  // Nome seguro para arquivo: sem acento, sem caractere proibido no Windows
+  const limpo = (nomeArquivo || 'conversa')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .slice(0, 60) || 'conversa';
+  const data = new Date().toISOString().slice(0, 10);
+  a.href = url;
+  a.download = `${limpo}_${data}.md`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ─── Legacy migration ────────────────────────────────────────────
 
 export function migrateLegacyData(): string | null {

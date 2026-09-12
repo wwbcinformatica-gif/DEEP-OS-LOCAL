@@ -3,6 +3,7 @@ import {
   Conversation, TranscriptEntry,
   getConversations, createConversation, renameConversation, deleteConversation,
   getTranscripts, saveTranscripts, getActivityLog, saveActivityLog,
+  getMessages, saveMessages, conversationToMarkdown, baixarTexto,
   tenantGet, tenantSet,
 } from './chatStorage';
 
@@ -492,11 +493,54 @@ const JarvisPage: React.FC = () => {
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  // ── Historico da conversa (mensagens do chat) ────────────────────────────
+  //
+  // CORRIDA CORRIGIDA: os dois useEffects abaixo dependem de `activeConvId`. Ao
+  // trocar de conversa, o de CARREGAR e o de SALVAR rodam no MESMO commit — e o
+  // de salvar ainda enxerga as mensagens da conversa ANTERIOR (o estado so muda
+  // no proximo render). Resultado: abrir uma conversa GRAVAVA nela o conteudo da
+  // anterior, destruindo o historico que o usuario tinha acabado de abrir.
+  //
+  // A trava: enquanto uma conversa esta sendo carregada, o efeito de salvar
+  // ignora. Uso ref (nao estado) porque precisa valer no mesmo commit.
+  const carregandoConversaRef = useRef(false);
+
   useEffect(() => {
-    if (activeConvId) {
-      setTranscripts(getTranscripts(activeConvId));
-    }
+    if (!activeConvId) return;
+    carregandoConversaRef.current = true;
+    const salvas = getMessages(activeConvId);
+    // Restaura as mensagens gravadas; se nao houver nenhuma, mantem a saudacao.
+    setMessages(salvas.length > 0
+      ? salvas.map(m => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: new Date(m.timestamp),
+        }))
+      : [{
+          id: '1',
+          role: 'jarvis' as const,
+          content: 'Ola! Sou o Jarvis, seu assistente inteligente. Posso ouvir voce, executar tarefas e usar ferramentas. Como posso ajudar?',
+          timestamp: new Date(),
+        }]);
+    setTranscripts(getTranscripts(activeConvId));
+    // Libera no proximo tick: depois que o React aplicou o novo estado.
+    const t = setTimeout(() => { carregandoConversaRef.current = false; }, 0);
+    return () => clearTimeout(t);
   }, [activeConvId]);
+
+  useEffect(() => {
+    if (!activeConvId) return;
+    // Nao gravar enquanto a conversa esta sendo carregada (ver a corrida acima)
+    if (carregandoConversaRef.current) return;
+    if (messages.length === 0) return;
+    saveMessages(activeConvId, messages.map(m => ({
+      id: m.id,
+      role: m.role,
+      content: m.content,
+      timestamp: m.timestamp instanceof Date ? m.timestamp.toISOString() : String(m.timestamp),
+    })));
+  }, [messages, activeConvId]);
 
   useEffect(() => {
     if (activeConvId && transcripts.length > 0) {
@@ -1253,6 +1297,21 @@ const JarvisPage: React.FC = () => {
             <button onClick={newConversation} title="Nova conversa" style={s.convNewBtn}>+</button>
             <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nova conversa'}</button>
             <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
+            {/* Exportar a conversa — a pedido do usuario: "colocar um download
+                no historico para salvar o estudo ou pesquisa".
+                Gera um .md com as mensagens (e a transcricao de voz, se houver),
+                que abre em qualquer editor e cola bem em anotacoes. */}
+            <button
+              onClick={() => {
+                if (!activeConvId) { alert('Nenhuma conversa aberta.'); return; }
+                const md = conversationToMarkdown(activeConvId, activeConv?.name || 'Conversa');
+                if (!md) { alert('Esta conversa ainda nao tem mensagens salvas para exportar.'); return; }
+                baixarTexto(activeConv?.name || 'conversa', md);
+                addProcess('info', 'Conversa exportada', `${md.length} caracteres em Markdown`);
+              }}
+              title="Baixar esta conversa (.md) para estudo ou pesquisa"
+              style={{ background: 'none', border: 'none', color: '#7c9', cursor: 'pointer', fontSize: 12, padding: '2px 4px', lineHeight: 1 }}
+            >{'\u2B07'}</button>
             {showConvMenu && (
               <div style={s.convDropdown}>
                 {conversations.map(conv => (
