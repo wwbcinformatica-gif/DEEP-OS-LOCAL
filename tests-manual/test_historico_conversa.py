@@ -136,6 +136,56 @@ check("getTranscripts(activeConvId)" in charon,
       "o Charon nao restaura a transcricao")
 
 print()
+print("=== 5. Workspaces (raiz) no historico ===")
+# Pedido: "queria que o historico tivesse um Workspaces estilo raiz igual aqui no
+# dsh, mas sem atrapalhar o visual do painel, tem que ser discreto".
+check("workspace?: string" in storage,
+      "a conversa tem o campo `workspace` (opcional, para nao quebrar as antigas)",
+      "nao existe o campo workspace — nao ha como agrupar")
+check("workspace?" in storage and "WORKSPACE_PADRAO" in storage,
+      "ha um workspace padrao para conversas sem raiz definida",
+      "conversa sem workspace ficaria orfa, fora de qualquer grupo")
+check("export function getWorkspaces" in storage,
+      "existe getWorkspaces()",
+      "nao ha como listar as raizes")
+check("export function setConversationWorkspace" in storage,
+      "existe setConversationWorkspace()",
+      "nao ha como mover uma conversa de raiz")
+check("workspace" in re.search(r"export function createConversation\([^)]*\)", storage).group(0),
+      "createConversation aceita o workspace",
+      "conversa nova nao pode nascer numa raiz")
+
+check("getWorkspaces, setConversationWorkspace, WORKSPACE_PADRAO" in jarvis,
+      "o JarvisPage importa as funcoes de workspace",
+      "o JarvisPage nao usa o recurso")
+check("workspaceAtivo" in jarvis, "existe o estado `workspaceAtivo`",
+      "nao ha workspace ativo na tela")
+check("jarvis_workspace" in jarvis,
+      "o workspace ativo e lembrado entre sessoes (localStorage)",
+      "o workspace ativo se perde ao recarregar")
+# Discreto: precisa ser um chip pequeno, nao um painel
+m_chip = re.search(r"Workspace atual: \$\{workspaceAtivo\}", jarvis)
+check(m_chip is not None, "o chip tem tooltip explicando", "o chip nao explica o que faz")
+# Discreto: o estilo do chip vem logo depois do tooltip e precisa usar fonte
+# pequena. (Procurar numa janela fixa a partir do tooltip e mais preciso do que
+# partir o arquivo por uma palavra.)
+trecho_chip = jarvis[m_chip.start():m_chip.start() + 700] if m_chip else ""
+check("fontSize: 9" in trecho_chip,
+      "o chip usa fonte pequena (discreto, como pedido)",
+      f"o chip nao usa fonte pequena — estilo encontrado: {trecho_chip[:200]!r}")
+# Agrupamento na lista
+check("conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws)" in jarvis,
+      "a lista agrupa as conversas por workspace",
+      "a lista continua solida, sem agrupamento")
+check("ws.toUpperCase()" in jarvis,
+      "o cabecalho da raiz e discreto (caixa alta, cinza)",
+      "o cabecalho da raiz nao segue o padrao discreto")
+# Conversa nova precisa herdar a raiz ativa
+check("createConversation(undefined, workspaceAtivo)" in jarvis,
+      "conversa nova nasce no workspace ativo",
+      "conversa nova cai sempre na raiz padrao")
+
+print()
 print("=" * 70)
 if falhas:
     print(f"RESULTADO: {len(falhas)} FALHA(S)")

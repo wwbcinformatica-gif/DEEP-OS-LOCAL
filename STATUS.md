@@ -1,6 +1,6 @@
 # DEEP-OS — Status do Projeto
 
-**Ultima atualizacao:** 2026-09-12 (Sessao 49) — Chaves de API, modelos 404, Charon (barge-in + saudacao) e provedores personalizados
+**Ultima atualizacao:** 2026-09-12 (Sessao 49) � ver `docs/CONTINUAR.md` para o estado atual e o que falta
 
 **Commit em producao:** `1c6acbf` | **Backend:** `deepos-backend.service` (active) | **Site:** https://deep-os.tech
 

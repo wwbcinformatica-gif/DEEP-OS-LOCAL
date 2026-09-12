@@ -28,6 +28,26 @@ if not exist "venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
+
+)
+
+REM 4. Inicia Backend (porta 8001)
+echo [4/6] Iniciando Backend (FastAPI + WebSocket)...
+set "BACKEND_DIR=%~dp0backend"
+set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
+cd /d "%BACKEND_DIR%"
+start "WBC Backend :8001" cmd /c "%PYTHON_EXE%" -m uvicorn main:app --host 0.0.0.0 --port 8001 --log-level warning
+timeout /t 4 /nobreak >nul
+echo  OK
+
+REM 5. Inicia Frontend (porta 5175)
+echo [5/6] Iniciando Frontend (Vite + React)...
+set "FRONTEND_DIR=%~dp0frontend"
+cd /d "%FRONTEND_DIR%"
+start "WBC Frontend :5175" cmd /c npm run dev
+timeout /t 3 /nobreak >nul
+echo  OK
+
 echo  OK
 
 REM 3. Inicia llama-server com GGUF (porta 8080)
@@ -58,24 +78,6 @@ if defined MODEL_GGUF (
     echo  OK - Modelo: %MODEL_GGUF%
 ) else (
     echo  AVISO: Nenhum modelo .gguf encontrado em models\
-)
-
-REM 4. Inicia Backend (porta 8001)
-echo [4/6] Iniciando Backend (FastAPI + WebSocket)...
-set "BACKEND_DIR=%~dp0backend"
-set "PYTHON_EXE=%~dp0venv\Scripts\python.exe"
-cd /d "%BACKEND_DIR%"
-start "WBC Backend :8001" cmd /c "%PYTHON_EXE%" -m uvicorn main:app --host 0.0.0.0 --port 8001 --log-level warning
-timeout /t 4 /nobreak >nul
-echo  OK
-
-REM 5. Inicia Frontend (porta 5175)
-echo [5/6] Iniciando Frontend (Vite + React)...
-set "FRONTEND_DIR=%~dp0frontend"
-cd /d "%FRONTEND_DIR%"
-start "WBC Frontend :5175" cmd /c npm run dev
-timeout /t 3 /nobreak >nul
-echo  OK
 
 REM 6. Abre navegador
 echo [6/6] Abrindo navegador...

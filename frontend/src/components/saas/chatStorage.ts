@@ -8,6 +8,37 @@ export interface Conversation {
   name: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Workspace (raiz) a que a conversa pertence.
+   *
+   * Agrupa as conversas como o seletor de workspace do DSH: em vez de uma lista
+   * solida de dezenas de conversas, elas ficam organizadas sob a raiz em que
+   * foram feitas. Opcional para nao quebrar as conversas ja gravadas — quem nao
+   * tem o campo entra no workspace padrao.
+   */
+  workspace?: string;
+}
+
+/** Workspace usado quando a conversa nao tem um definido. */
+export const WORKSPACE_PADRAO = 'Geral';
+
+/** Raizes disponiveis: as ja usadas + a padrao (sempre presente). */
+export function getWorkspaces(): string[] {
+  const usados = new Set<string>([WORKSPACE_PADRAO]);
+  for (const c of getConversations()) {
+    if (c.workspace) usados.add(c.workspace);
+  }
+  return [...usados].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+}
+
+/** Define o workspace de uma conversa. */
+export function setConversationWorkspace(convId: string, workspace: string): void {
+  const convs = getConversations();
+  const i = convs.findIndex(c => c.id === convId);
+  if (i < 0) return;
+  convs[i].workspace = (workspace || '').trim() || WORKSPACE_PADRAO;
+  convs[i].updatedAt = Date.now();
+  saveConversations(convs);
 }
 
 export interface TranscriptEntry {
@@ -66,12 +97,13 @@ export function saveConversations(convs: Conversation[]): void {
   tenantSet(CONVERSATIONS_KEY, JSON.stringify(convs));
 }
 
-export function createConversation(firstMessage?: string): Conversation {
+export function createConversation(firstMessage?: string, workspace?: string): Conversation {
   const conv: Conversation = {
     id: generateId(),
     name: firstMessage ? autoName(firstMessage) : 'Nova conversa',
     createdAt: Date.now(),
     updatedAt: Date.now(),
+    workspace: (workspace || '').trim() || WORKSPACE_PADRAO,
   };
   const all = getConversations();
   all.unshift(conv);

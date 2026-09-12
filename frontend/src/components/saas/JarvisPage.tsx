@@ -4,6 +4,7 @@ import {
   getConversations, createConversation, renameConversation, deleteConversation,
   getTranscripts, saveTranscripts, getActivityLog, saveActivityLog,
   getMessages, saveMessages, conversationToMarkdown, baixarTexto,
+  getWorkspaces, setConversationWorkspace, WORKSPACE_PADRAO,
   tenantGet, tenantSet,
 } from './chatStorage';
 
@@ -504,6 +505,20 @@ const JarvisPage: React.FC = () => {
   // A trava: enquanto uma conversa esta sendo carregada, o efeito de salvar
   // ignora. Uso ref (nao estado) porque precisa valer no mesmo commit.
   const carregandoConversaRef = useRef(false);
+
+  // ── Workspace (raiz) da conversa — pedido do usuario: "queria que o historico
+  // tivesse um Workspaces estilo raiz igual aqui no dsh, mas sem atrapalhar o
+  // visual do painel, tem que ser discreto".
+  //
+  // Agrupa as conversas por raiz em vez de mostrar uma lista solida. O controle
+  // fica como um chip pequeno na barra da conversa: cumpre a funcao sem ocupar
+  // espaco nem competir com o nome da conversa.
+  const [workspaceAtivo, setWorkspaceAtivo] = useState<string>(
+    () => tenantGet('jarvis_workspace') || WORKSPACE_PADRAO
+  );
+  const [todosWorkspaces, setTodosWorkspaces] = useState<string[]>(() => getWorkspaces());
+  const [editandoWorkspace, setEditandoWorkspace] = useState(false);
+  const [novoWorkspace, setNovoWorkspace] = useState('');
 
   useEffect(() => {
     if (!activeConvId) return;
@@ -1141,8 +1156,10 @@ const JarvisPage: React.FC = () => {
   };
 
   const newConversation = () => {
-    const conv = createConversation();
+    // A conversa nova nasce no workspace ativo (a raiz escolhida na barra)
+    const conv = createConversation(undefined, workspaceAtivo);
     setConversations(getConversations());
+    setTodosWorkspaces(getWorkspaces());
     setActiveConvId(conv.id);
     setTranscripts([]);
     setProcessLog([]);
@@ -1297,6 +1314,48 @@ const JarvisPage: React.FC = () => {
             <button onClick={newConversation} title="Nova conversa" style={s.convNewBtn}>+</button>
             <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nova conversa'}</button>
             <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
+            {/* ── Workspace: chip DISCRETO na barra ──────────────────────────
+                Mostra so o nome da raiz, em texto pequeno e apagado. Clicar
+                abre o seletor. A ideia e organizar o historico por raiz sem
+                disputar atencao com o nome da conversa nem mudar o layout. */}
+            <button
+              onClick={() => setEditandoWorkspace(v => !v)}
+              title={`Workspace atual: ${workspaceAtivo} — clique para trocar`}
+              style={{
+                background: 'none', border: '1px solid #2a2a2a', borderRadius: 8,
+                color: '#666', fontSize: 9, padding: '0 5px', cursor: 'pointer',
+                maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap' as const, flexShrink: 0,
+              }}
+            >{'\u25F0'} {workspaceAtivo}</button>
+            {editandoWorkspace && (
+              <div style={{ position: 'absolute', top: '100%', right: 6, zIndex: 120, background: '#141414', border: '1px solid #2a2a2a', borderRadius: 6, padding: 6, minWidth: 150 }}>
+                <div style={{ fontSize: 8, color: '#555', letterSpacing: 1, marginBottom: 4 }}>WORKSPACE</div>
+                {todosWorkspaces.map(w => (
+                  <div key={w} onClick={() => {
+                    setWorkspaceAtivo(w);
+                    tenantSet('jarvis_workspace', w);
+                    // Move a conversa aberta para a raiz escolhida
+                    if (activeConvId) setConversationWorkspace(activeConvId, w);
+                    setConversations(getConversations());
+                    setEditandoWorkspace(false);
+                  }} style={{ fontSize: 10, padding: '3px 4px', cursor: 'pointer', color: w === workspaceAtivo ? '#00d9ff' : '#999', borderRadius: 3 }}>
+                    {w === workspaceAtivo ? '\u2713 ' : ''}{w}
+                  </div>
+                ))}
+                <div style={{ display: 'flex', gap: 4, marginTop: 5, borderTop: '1px solid #222', paddingTop: 5 }}>
+                  <input value={novoWorkspace} onChange={e => setNovoWorkspace(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && novoWorkspace.trim()) {
+                      const w = novoWorkspace.trim();
+                      setWorkspaceAtivo(w); tenantSet('jarvis_workspace', w);
+                      if (activeConvId) setConversationWorkspace(activeConvId, w);
+                      setTodosWorkspaces(getWorkspaces()); setConversations(getConversations());
+                      setNovoWorkspace(''); setEditandoWorkspace(false);
+                    } }}
+                    placeholder="nova raiz..." style={{ flex: 1, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 3, color: '#ccc', fontSize: 9, padding: '2px 4px', outline: 'none' }} />
+                </div>
+              </div>
+            )}
             {/* Exportar a conversa — a pedido do usuario: "colocar um download
                 no historico para salvar o estudo ou pesquisa".
                 Gera um .md com as mensagens (e a transcricao de voz, se houver),
@@ -1314,14 +1373,30 @@ const JarvisPage: React.FC = () => {
             >{'\u2B07'}</button>
             {showConvMenu && (
               <div style={s.convDropdown}>
-                {conversations.map(conv => (
-                  <div key={conv.id} onClick={() => switchConversation(conv.id)} style={{ ...s.convItem, background: conv.id === activeConvId ? 'rgba(0,217,255,0.15)' : 'transparent' }}>
-                    <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#00d9ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{conv.name}</span>
-                    <span style={{ fontSize: 9, color: '#666' }}>{formatConvTime(conv.updatedAt)}</span>
-                    <button onClick={(e) => handleRenameConversation(conv.id, e)} style={s.convActionBtn}>{'\u270E'}</button>
-                    <button onClick={(e) => handleDeleteConversation(conv.id, e)} style={{ ...s.convActionBtn, color: '#f44' }}>{'\u2715'}</button>
-                  </div>
-                ))}
+                {/* Agrupado por workspace, com a arvore discreta: a raiz em
+                    caixa alta e cinza, as conversas indentadas abaixo dela.
+                    Assim a lista fica organizada sem virar uma tela de pastas. */}
+                {todosWorkspaces.map(ws => {
+                  const doWs = conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws);
+                  if (doWs.length === 0) return null;
+                  return (
+                    <div key={ws}>
+                      <div style={{ fontSize: 8, color: '#4a4a4a', letterSpacing: 1, padding: '4px 6px 2px', display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>{'\u25F0'}</span><span>{ws.toUpperCase()}</span>
+                        <span style={{ marginLeft: 'auto', opacity: 0.6 }}>{doWs.length}</span>
+                      </div>
+                      {doWs.map(conv => (
+                        <div key={conv.id} onClick={() => switchConversation(conv.id)} style={{ ...s.convItem, paddingLeft: 14, background: conv.id === activeConvId ? 'rgba(0,217,255,0.15)' : 'transparent' }}>
+                          <span style={{ color: '#2a2a2a', marginRight: 3 }}>{'\u2514'}</span>
+                          <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#00d9ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{conv.name}</span>
+                          <span style={{ fontSize: 9, color: '#666' }}>{formatConvTime(conv.updatedAt)}</span>
+                          <button onClick={(e) => handleRenameConversation(conv.id, e)} style={s.convActionBtn}>{'\u270E'}</button>
+                          <button onClick={(e) => handleDeleteConversation(conv.id, e)} style={{ ...s.convActionBtn, color: '#f44' }}>{'\u2715'}</button>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

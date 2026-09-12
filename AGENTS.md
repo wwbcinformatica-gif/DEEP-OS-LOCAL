@@ -1,5 +1,13 @@
 # DEEP-OS - Agent Instructions
 
+> ## 📌 SE VOCÊ É UM MODELO NOVO CONTINUANDO ESTE PROJETO, LEIA PRIMEIRO:
+> **[`docs/CONTINUAR.md`](docs/CONTINUAR.md)**
+>
+> Lá está o estado atual (commits do PC, do gêmeo e da VPS), o que está pendente,
+> o que NÃO deve ser refeito, o problema conhecido que ficou aberto, e as
+> armadilhas que já custaram tempo. Depois leia `memory.md` (regras) e
+> `STATUS.md` (histórico).
+
 ## ⛔ REGRA OBRIGATÓRIA Nº 1 — DOIS PROJETOS GÊMEOS
 
 **LEIA ISTO ANTES DE QUALQUER ALTERAÇÃO. VALE PARA TODOS OS MODELOS DE IA.**
@@ -96,7 +104,7 @@ O passo 2 é o que torna a cópia segura: ele acusa qualquer arquivo que tenha
 
 ### DEPOIS DE ALTERAR, SEMPRE
 
-1. Rode a suíte nos **dois**: `python tests-manual/run_all.py` (19 arquivos)
+1. Rode a suíte nos **dois**: `python tests-manual/run_all.py` (20 arquivos)
 2. **Commit + push** no git dos **dois** (cada um no seu remoto e na sua branch)
 3. Sua mensagem final deve dizer **explicitamente** que o gêmeo foi sincronizado
    — ou **por que** não foi
