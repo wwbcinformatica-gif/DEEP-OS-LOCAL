@@ -11,12 +11,13 @@ depender do histórico da conversa**. Leia isto primeiro, depois `memory.md`.
 
 | | Commit | Onde |
 |---|--------|------|
-| **DEEP-OS** (principal) | `0977ff8` + o commit dos workspaces | `C:\DEEP-OS`, branch `master` |
-| **DEEP-OS-LOCAL** (gêmeo) | sincronizado no mesmo dia | `C:\DEEP-OS-LOCAL`, branch `main` |
-| **VPS** | `742f376` | `/root/DEEP-OS` |
+| **DEEP-OS** (principal) | `aff1b8b` | `C:\DEEP-OS`, branch `master` |
+| **DEEP-OS-LOCAL** (gêmeo) | `6fea43b` | `C:\DEEP-OS-LOCAL`, branch `main` |
+| **VPS** | `aff1b8b` | `/root/DEEP-OS` ✅ sincronizado |
 
-⚠️ **A VPS está ATRASADA.** Os commits do histórico das conversas e dos
-workspaces **ainda não foram para produção**. Para atualizar:
+Para conferir se a VPS está em dia: `git -C /root/DEEP-OS log --oneline -1`
+
+Para atualizar a VPS:
 
 ```
 cd /root/DEEP-OS
@@ -25,6 +26,14 @@ git reset --hard origin/master
 ```
 ```
 cd /root/DEEP-OS && bash scripts/deploy-faf8f93.sh
+```
+
+Depois do deploy, **confirme que o código subiu** (o "HTTP 200" do script não
+prova isso):
+
+```powershell
+cd C:\DEEP-OS
+node tools\verificar-deploy.cjs
 ```
 
 ---
@@ -206,19 +215,45 @@ DEEP-OS usa como padrão e não tem a cota apertada do Gemini grátis.
 
 ## 6. Armadilhas que já custaram tempo (leia antes de editar)
 
+0. **⚠️ A PIOR: código duplicado — corrija nos DOIS (ou nos TRÊS) lugares.**
+   Já causou quatro bugs nesta sessão, todos do mesmo tipo: eu conserto um lugar
+   e esqueço o outro, que é uma cópia.
+   - `carregandoConversaRef` (trava da corrida carregar/salvar): existe no
+     **JarvisPage** e no **CharonPage**. Eu pus só no Jarvis e o Charon
+     **apagava o histórico** a cada abertura.
+   - fallback de tool-call em texto: `stream_chat_with_tools` **e**
+     `complete_chat_with_tools` — só um tinha, e o modelo "anunciava e não fazia".
+   - `self._interrupted = False`: estava em **dois** caminhos de alta frequência
+     (loop de recebimento **e** `send_audio`).
+   - `createConversation`: **três** pontos criam conversa (botão `+`,
+     auto-create da primeira mensagem, e o fallback da exclusão).
+   **Antes de fechar qualquer correção, procure as cópias.** `grep` pelo nome da
+   função/variável que você acabou de mudar.
+
 1. **Rotas FastAPI resolvem por ordem de registro.** Catch-all `/{param}` sempre
    por último. Já causou o vazamento de identidade entre tenants.
 2. **`/models` MENTE.** O do OpenRouter é público (aprova chave falsa) e o da
    NVIDIA lista modelos que a conta não tem. Só a chamada de chat prova.
 3. **O delimitador DSML é U+FF5C** (barra vertical de largura total), não `|`.
-4. **Caminhos com e sem streaming precisam ter a mesma capacidade** — foi essa
-   assimetria que fez o modelo anunciar e não entregar.
+4. **Caminhos com e sem streaming precisam ter a mesma capacidade.**
 5. **Testes desta suíte se enganam lendo COMENTÁRIO/DOCSTRING como código** —
    aconteceu 5 vezes. Sempre remova comentários antes de procurar texto.
 6. **Regra que depende de disciplina vai ser quebrada** (inclusive por mim, na
    mesma sessão em que a escrevi). Prefira fazer a FERRAMENTA recusar.
 7. **Os dois projetos têm `venv` em pastas diferentes** — confira antes de passar
-   comando ao usuário.
+   comando ao usuário. Na VPS é `/root/DEEP-OS/venv/bin/python`.
+8. **Cada tenant tem banco PRÓPRIO.** `data/interactions.db` é o padrão;
+   `data/tenants/{tenant_id}/database.sqlite` é o do usuário. Limpar só o
+   primeiro não limpa "o histórico" — eu disse isso errado uma vez. Use
+   `tools/limpar-historico.py` (lista todos, e limpa com `--limpar`) ou a ação
+   "Limpar tudo" na interface, que passa pelo middleware e acerta o banco certo.
+9. **O nginx só encaminha `/api/ /auth/ /chat/ /voice/ /admin/ /ws/`.** Rota nova
+   fora disso responde 200 com o HTML do frontend — o frontend leria como
+   sucesso sem nada ter acontecido. Por isso existe `/api/history` **e**
+   `/history`. Ao criar rota que o **navegador** vai chamar, use prefixo `/api/`.
+10. **Efeito que carrega e efeito que salva, ambos dependendo do mesmo id, rodam
+    no MESMO commit** — e o de salvar enxerga o estado ANTERIOR. É a corrida que
+    apagou histórico duas vezes (Jarvis e Charon). Trave com um `useRef`.
 
 ---
 
