@@ -38,6 +38,41 @@ Sistema operacional de agentes de IA com 3 modos de interacao:
 - **SaaS** — Multi-tenant para venda/locacao
 
 ## Status Atual (2026-09-12)
+**SESSAO 50 — CHARON: `<ctrl46>`, ESCOLHA DE CONTEXTO E SESSAO NOMEADA** ✓
+
+### Charon: o turno que nascia morto (`<ctrl46>`)
+**Documentacao: [`docs/CHARON-VOZ.md`](docs/CHARON-VOZ.md) e
+[`docs/CONTINUAR.md`](docs/CONTINUAR.md) secao 5.1**
+
+`<ctrl46>` NAO era texto nosso: e token de controle interno do Gemini
+(`<ctrlN>`) que vaza na `output_transcription` quando a geracao degenera. O turno
+fechava com **zero voz e zero texto real** e, como **nao havia erro nenhum**, a
+reconexao automatica nunca disparava — o Charon ficava **mudo para sempre**.
+Correcao: filtro do token + contadores de saude por turno + `_fechar_turno()`
+(1a falha pede a resposta de novo; 2a seguida reabre a sessao reenviando o
+contexto). Barge-in nao conta como falha.
+
+**Bug serio achado de quebra:** `_reconnect()` montava a system instruction só
+com a voz — sem fuso, idioma e **sem as instrucoes personalizadas** (de onde vem
+o nome do usuario). Toda reconexao fazia o Charon esquecer quem era o usuario.
+
+### Charon: o usuario escolhe o contexto (nao liga sozinho)
+Pedido: *"eu escolho do lado direito no workspace novo chat ou clico em algum
+historico registrado ... nao faz nenhuma das duas ate eu escolher"*.
+
+- auto-start **removido** (timer + listener de gesto);
+- `modoInicio: 'escolher' | 'novo' | 'historico'`, abrindo em `'escolher'`;
+- **`+ Novo chat`** → sessao nova, conecta sozinho, ele **cumprimenta**;
+- **clique numa sessao da arvore** → manda aquele historico como contexto e ele
+  **pergunta de onde continuar**;
+- `entrarNaConversa()` centraliza "trocar contexto = reconectar".
+
+### Sessao com o nome do assistente
+`createConversation(firstMessage?, workspace?, nomePadrao?)` + `nomeUnico()`
+("Charon", "Charon 2", ...). O nome vem de **Configuracoes → Identidade →
+NOME DO ASSISTENTE** — vale para o **Charon e o Jarvis**.
+
+### Historico anterior da sessao 49
 **SESSAO 49 — CHAVES, MODELOS, CHARON, PROVEDORES E EXECUCAO DE FERRAMENTAS** ✓
 
 ### Ferramentas: o modelo "anunciava e nao fazia"
@@ -323,35 +358,57 @@ pela porta 8001 em loop. Para descobrir qual atende de fato:
 ps -o unit= -p $(ss -lptnH 'sport = :8001' | grep -oP 'pid=\K[0-9]+' | head -1)
 ```
 
-## O que esta pendente (Sessao 49)
-1. ~~**DOWNLOAD DOS DOCUMENTOS (404)**~~ — ✅ **RESOLVIDO** (`91d7abb`).
-   **Causa raiz:** havia **DOIS sanitizadores de `tenant_id`** diferentes — o
-   `routes/download.py` removia `:` e `@`, e o `scripts/migrar-downloads-legados.sh`
-   (shell, rodado no VPS) usava o id **cru**. Os arquivos foram para
-   `downloads/master-admin:wwbc22@gmail.com/` e o backend procurava
-   `downloads/master-adminwwbc22gmail.com/` → pasta diferente → 404.
-   **Correção:** fonte única (`core.tenant_identity.tenant_slug`) + o download
-   procura nas duas variações. Teste: `tests-manual/test_tenant_slug.py`.
-   **Nota:** `:` em nome de pasta é **proibido no Windows** — o caso nunca se
-   reproduziria no PC. Ver a regra 3 em "Regras Importantes".
-2. ~~**DIST-SAAS GITIGNORE**~~ — ✅ CONCLUIDO (`74c2a73`)
-3. ~~**TESTAR TENANT ISOLATION**~~ — ✅ VERIFICADO em producao
-4. **MICROFONE NO FIREFOX** — liberar a permissao (bloqueada pelo auto-start
-   antigo): cadeado 🔒 → Microfone → Permitir → recarregar
-5. **TESTAR LEMBRETES** — criar por voz, ouvir o disparo, gerar documento
-6. **TESTAR CONVERSAS / DOCUMENTOS / HELP MENU** pela interface
-7. **FLUXO PIX / QRCODE / NOTIFICACOES** — testar ponta a ponta
-8. **SEGURANCA (depende de voce)** — trocar a senha de root do VPS e o
+## O que esta pendente (Sessao 50)
+
+**MUDOU NA SESSAO 50 — o Charon nao liga mais sozinho.** Se voce testar e ele
+ficar parado esperando, **e o comportamento novo, nao um bug**: abra o Charon e
+escolha `+ Novo chat` ou clique numa sessao da arvore.
+
+1. **TESTAR A ESCOLHA DE CONTEXTO** (falta, precisa de voz real):
+   - abrir o Charon e conferir que ele **nao liga sozinho**;
+   - `+ Novo chat` → ele **cumprimenta automaticamente**;
+   - clicar numa sessao da arvore → ele **retoma o contexto e pergunta de onde
+     continuar**.
+2. **TESTAR O `<ctrl46>`** — o teste prova a logica com turno simulado; so o uso
+   real confirma que a recuperacao pega o caso de verdade.
+3. **MICROFONE NO FIREFOX** — o auto-start (que queimava a permissao sem gesto)
+   **foi removido**; agora vale retestar: o clique da escolha ja e o gesto que o
+   Firefox exige. Se ainda estiver bloqueado: cadeado 🔒 → Microfone → Permitir.
+4. **TESTAR LEMBRETES** — criar por voz, ouvir o disparo, gerar documento
+5. **TESTAR CONVERSAS / DOCUMENTOS / HELP MENU** pela interface
+6. **FLUXO PIX / QRCODE / NOTIFICACOES** — testar ponta a ponta
+7. **SEGURANCA (depende de voce)** — trocar a senha de root do VPS e o
    `MASTER_PASSWORD` (ainda e `admin123@`; o log avisa a cada login)
-9. **Git cleanup** — branch `main` desatualizada; trocar a default para `master`
-10. **RECARREGAR/GERAR CHAVES (depende de voce — nao e bug de codigo):**
+8. **Git cleanup** — branch `main` desatualizada; trocar a default para `master`
+9. **RECARREGAR/GERAR CHAVES (depende de voce — nao e bug de codigo):**
     - OpenRouter: chave **invalida** (`401 User not found`) → nova em
       <https://openrouter.ai/keys>
     - OpenAI: chave **invalida** (`401 Incorrect API key`)
     - Zhipu: conta **sem saldo** (`429`) | MiMo: **sem saldo** (`402`)
     - OpenCode: conta **sem saldo** (`401 Insufficient balance`)
-11. **DEPLOY DA SESSAO 49** — os commits de chaves e modelos ainda **nao estao no
+10. **DEPLOY DA SESSAO 50** — os commits desta sessao (Charon `<ctrl46>`,
+    escolha de contexto, sessao nomeada) e os da sessao 49 ainda **nao estao no
     VPS**. Rodar o comando de deploy abaixo.
+
+### ✅ Concluido na sessao 50 (para referencia)
+- **`<ctrl46>` (Charon mudo para sempre):** token de controle do Gemini vazava
+  como texto e o turno fechava sem voz e sem erro → filtrado
+  (`_limpar_tokens_controle`) + `_fechar_turno()` com recuperacao escalonada
+  (1a falha pede de novo, 2a reabre a sessao com o contexto)
+- **Reconexao nao esquece mais o usuario:** `_reconnect` montava a instrucao só
+  com a voz; agora reusa `_user_tz`/`_user_locale`/`_extra_prompt`
+- **Charon nao liga sozinho:** auto-start removido; `modoInicio`
+  (`escolher|novo|historico`) — `+ Novo chat` cumprimenta, clique numa sessao
+  restaura o contexto e **pergunta de onde continuar**
+- **Sessao com o nome do assistente:** `createConversation(msg, ws, nomePadrao)`
+  + `nomeUnico()` (Charon, Charon 2, …) no **Charon e no Jarvis**, lendo
+  Configuracoes → Identidade
+- **Aviso de interrupcao** saiu do painel central para o painel direito
+  (transcricao, rotulado "Sistema")
+- **`TranscriptEntry` duplicado** removido do `CharonPage` (TS2440)
+- **`STATUS.md` com byte invalido (0x97)** corrigido — o arquivo nem abria
+- **Testes:** `test_charon_barge_in.py` secao 8 (turno vazio) e
+  `test_charon_historico.py` secao 7 (as duas escolhas) → **20/20**
 
 ### ✅ Concluido na sessao 49 (para referencia)
 - **Provedores:** `openai`/`opencode`/`openclaude` ganharam campo de chave; 14
@@ -1148,3 +1205,38 @@ lsof -i :443
 56. **Movimento e o sinal mais rapido de "esta andando".** Um passo de plano com
     icone girando e uma barra de progresso comunicam estado melhor do que
     qualquer texto — a queixa era justamente "fica ali parado".
+57. **Token de CONTROLE do Gemini pode VAZAR como texto — e mata o turno.** O
+    usuario viu `<ctrl46>` duas vezes no painel e o Charon nunca mais respondeu.
+    Nao e texto nosso: e token interno (`<ctrlN>`) que vaza na
+    `output_transcription` quando a geracao degenera. O turno fecha com ZERO
+    audio e ZERO texto real, **sem erro nenhum** — entao a reconexao automatica
+    nunca disparava. Filtre o token E trate "turno vazio" como falha
+    (`_fechar_turno`): 1a vez pede de novo, 2a seguida reabre a sessao.
+58. **Turno que fecha sem `turn_complete` deixa o texto "colado" no proximo.** Se
+    voce so zera os contadores no fim do turno, um turno vazio herda o texto do
+    anterior e passa por saudavel — escondendo exatamente a falha. Zere tambem
+    quando o usuario COMECA a falar (`send_audio` com silencio > 0,5 s e
+    `input_transcription`).
+59. **Recuperacao de turno vazio NAO pode confundir com barge-in.** Turno
+    interrompido fecha sem audio **de proposito**; se contar como falha, o Charon
+    reabre sessao toda vez que o usuario fala por cima.
+60. **Reconexao precisa reconstruir a PERSONALIDADE, nao so a voz.** O
+    `_reconnect` montava a system instruction apenas com `self._voice` — sem
+    fuso, idioma e **sem as instrucoes personalizadas** (de onde vem o nome do
+    usuario). Resultado: toda reconexao fazia o Charon esquecer quem era o
+    usuario. Guarde `_user_tz` / `_user_locale` / `_extra_prompt` no `start()`.
+61. **Tipo duplicado em dois arquivos sombreia o importado.** `CharonPage.tsx`
+    tinha um `interface TranscriptEntry` local identico ao do `chatStorage` →
+    `TS2440` e mudanca de formato nao alcancava o arquivo. Se o `tsc` acusar
+    "conflicts with local declaration", e isto.
+62. **Auto-start de voz e uma decisao do usuario, nao um padrao tecnico.** Ligar
+    sozinho parecia "esperto" mas (a) abria falando sem ninguem pedir, (b) no
+    Firefox queimava a permissao do microfone sem gesto. O usuario quer ESCOLHER:
+    `+ Novo chat` (sessao nova, ele cumprimenta) ou clicar numa sessao do
+    historico (ele recebe aquele contexto e pergunta de onde continuar). O clique
+    da escolha E o gesto que o Firefox exige.
+63. **`.md` corrompido derruba qualquer modelo que tente ler.** O `STATUS.md`
+    tinha UM byte invalido (0x97, de um em-dash mal codificado) e por isso nao
+    abria em ferramenta de leitura — o handoff ficava cego mesmo estando no lugar
+    certo. Ao escrever com PowerShell, escreva **UTF-8 sem BOM** e valide
+    (`decode('utf-8')`) depois.

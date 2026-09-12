@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import sys
 import traceback
 from datetime import datetime
@@ -27,6 +28,30 @@ LIVE_MODEL = "models/gemini-2.5-flash-native-audio-preview-12-2025"
 # Gemini chegarem antes de fechar o turno. Curto demais corta a ultima
 # palavra; longo demais atrasa o retorno ao estado "ouvindo".
 TURN_TAIL_GRACE_S = 0.9
+
+# ── Tokens de CONTROLE do Gemini que vazam como texto ────────────────────────
+#
+# BUG RELATADO: "tem hora que charon para de responder, nao e sempre, mas as
+# vezes fica assim -> <ctrl46> ... e nao retorna".
+#
+# `<ctrl46>` NAO e texto do nosso codigo nem da nossa interface: e um token de
+# CONTROLE interno do Gemini (a familia `<ctrlN>`, "control token"). Ele deveria
+# ser consumido pelo modelo, mas nos modelos Live *preview* a geracao as vezes
+# degenera e o token vaza como TEXTO na `output_transcription` — e o turno morre
+# ali, sem fala nenhuma. Como nao chega erro, nada reconectava: Charon ficava
+# mudo para sempre.
+#
+# Aqui (1) filtramos esse lixo antes de chegar no painel e (2) contamos como
+# SINTOMA de geracao degenerada, o que dispara a recuperacao no fim do turno.
+_TOKEN_CONTROLE = re.compile(r"<\s*ctrl\s*\d+\s*>", re.IGNORECASE)
+
+
+def _limpar_tokens_controle(texto: str) -> str:
+    """Remove tokens de controle do Gemini (`<ctrl46>`) do texto exibido."""
+    if not texto:
+        return texto
+    return _TOKEN_CONTROLE.sub("", texto).strip()
+
 
 _root = str(Path(__file__).resolve().parent.parent.parent)
 if _root not in sys.path:
@@ -1107,6 +1132,13 @@ class VoiceSession:
         # Historico da conversa (transcripts) que sera enviado como contexto.
         self._history: list = []
 
+        # Personalidade da sessao — preenchida em start() e REUSADA na reconexao
+        # (antes a reconexao montava a instrucao sem fuso, idioma e instrucoes
+        # personalizadas, e o Charon esquecia o nome do usuario).
+        self._user_tz = "America/Sao_Paulo"
+        self._user_locale = "pt-BR"
+        self._extra_prompt = ""
+
         # Contadores de log agregado (ver _handle_response).
         #
         # Motivo: logar CADA chunk de audio enchia o /var/log/syslog do VPS —
@@ -1119,9 +1151,38 @@ class VoiceSession:
         self._maior_delay_ms = 0.0
         self._ultimo_aviso_delay = 0.0
 
+        # ── Saude do turno (bug do `<ctrl46>`) ──────────────────────────────
+        #
+        # Por turno guardamos: quantos bytes de VOZ o modelo gerou, se veio
+        # algum texto de verdade e quantos tokens de controle vazaram.
+        # Um turno que fecha com ZERO audio e token de controle vazado e uma
+        # geracao degenerada — o Charon "nao responde". Ver _recuperar_turno.
+        self._turno_bytes_audio = 0
+        self._turno_texto_real = ""
+        self._turno_tokens_controle = 0
+        # Marca que ja zeramos os contadores deste turno (zera no PRIMEIRO chunk,
+        # nao a cada chunk — senao nunca acumularia nada).
+        self._turno_aberto = False
+        # Falhas SEGUIDAS. Na primeira, so pedimos para repetir (barato); se
+        # repetir, o estado do servidor do Gemini esta corrompido e so uma
+        # sessao nova resolve.
+        self._falhas_turno = 0
+        self._recuperando = False
+
     async def start(self, voice: str = "Charon", user_tz: str = "America/Sao_Paulo", user_locale: str = "pt-BR", extra_prompt: str = "", history: list | None = None):
         if self._running:
             return False
+
+        # Guarda o que monta a PERSONALIDADE, para reusar numa reconexao.
+        # BUG: `_reconnect` montava a instrucao so com a voz, sem fuso, idioma e
+        # sem as instrucoes personalizadas (o nome do usuario, que vem delas).
+        # Depois de qualquer reconexao o Charon "esquecia" quem era o usuario.
+        self._user_tz = user_tz
+        self._user_locale = user_locale
+        self._extra_prompt = extra_prompt
+        # Sessao nova comeca saudavel (o contador de turnos vazios e por sessao).
+        self._falhas_turno = 0
+        self._turno_aberto = False
 
         # Historico da conversa escolhida na tela.
         #
@@ -1203,6 +1264,8 @@ class VoiceSession:
 
     async def send_text_chunked(self, text: str):
         MAX_CHUNK = 2000
+        # Pedido novo do cliente: comeca um turno novo (zera a saude do turno).
+        self._iniciar_turno()
         if len(text) <= MAX_CHUNK:
             await self.session.send_client_content(
                 turns={"parts": [{"text": text}]}, turn_complete=True
@@ -1236,6 +1299,14 @@ class VoiceSession:
             return
         try:
             t0 = asyncio.get_event_loop().time()
+            # Silencio antes deste chunk = o usuario comecou a falar agora.
+            #
+            # Serve para abrir um turno NOVO mesmo quando o anterior fechou sem
+            # `turn_complete` (interrupcao, evento perdido): sem isto o texto do
+            # turno velho ficaria colado no novo e um turno vazio passaria por
+            # saudavel — escondendo justamente o bug do `<ctrl46>`.
+            if (t0 - self._last_audio_sent_time) > 0.5 and not self._interrupted:
+                self._iniciar_turno()
             await self.session.send_realtime_input(
                 media={"data": audio_data, "mime_type": "audio/pcm;rate=16000"}
             )
@@ -1796,17 +1867,29 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
 
     async def _pedir_retomada(self, turnos_enviados: int):
         """
-        Pede uma retomada curta depois de restaurar o historico.
+        Retomada depois de restaurar o historico: mostra que sabe do assunto e
+        PERGUNTA de onde continuar.
+
+        PEDIDO DO USUARIO (as duas escolhas da tela do Charon):
+          "1 nova conversa -> charon ja comeca automaticamente"
+          "2 se eu escolher um dos historicos ele ja comeca sabendo de todo o
+           conteudo daquele historico e ja pergunta de onde quer continuar ou
+           alguma pergunta sobre o historico"
 
         O gatilho e explicito sobre NAO se reapresentar e sobre nao resumir a
         conversa inteira: sem essas duas proibicoes o modelo tende a fazer um
-        resumo longo do que foi conversado, o que e ruim em voz.
+        resumo longo do que foi conversado, o que e ruim em voz. Mas ele PRECISA
+        perguntar de onde continuar — e o que fecha a escolha do usuario.
         """
         trigger = (
             f"Voce acabou de receber os {turnos_enviados} turnos anteriores desta conversa como contexto. "
-            "Retome de onde paramos SEM se reapresentar e SEM resumir o historico. "
-            "Diga em UMA frase curta (maximo 15 palavras) que voce lembra da conversa e pergunte o que ele quer fazer agora. "
-            "PROIBIDO: dizer seu nome, falar sobre o sistema, ferramentas ou funcionalidades, e listar o que foi conversado."
+            "Voce JA SABE do que estavamos falando. "
+            "Fale em UMA ou DUAS frases curtas (no maximo 25 palavras) que deixem claro que voce lembra do assunto "
+            "e TERMINE COM UMA PERGUNTA sobre o historico — por exemplo, de onde ele quer continuar, "
+            "ou sobre o ponto em que paramos. "
+            "SEM se reapresentar e SEM resumir o historico inteiro. "
+            "PROIBIDO: dizer seu nome, falar sobre o sistema, ferramentas ou funcionalidades, "
+            "listar o que foi conversado ou fazer um resumo longo."
         )
         print(f"[VoiceWS] Historico restaurado ({turnos_enviados} turnos) — pedindo retomada curta")
         self._turn_done_event.clear()
@@ -1911,6 +1994,9 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             delay_ms = (now - self._last_response_time) * 1000
             self._chunks_recebidos += 1
             self._chunks_no_turno += 1
+            # Primeiro chunk do turno: zera os contadores de saude do turno.
+            if not self._turno_aberto:
+                self._iniciar_turno()
             if delay_ms > self._maior_delay_ms:
                 self._maior_delay_ms = delay_ms
 
@@ -1931,6 +2017,7 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
                 self._maior_delay_ms = 0.0
 
         if response.data:
+            self._turno_bytes_audio += len(response.data)
             if self._interrupted:
                 pass  # discard old audio only
             else:
@@ -1951,6 +2038,14 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             # O portao de interrupcao existe para calar a SAIDA do Charon, nao
             # para cegar a entrada do usuario.
             if sc.input_transcription and sc.input_transcription.text:
+                # O usuario acabou de FALAR: comeca um turno novo de verdade.
+                #
+                # Sem esta marcacao, um turno anterior que fechou SEM
+                # `turn_complete` (interrupcao, evento perdido) deixaria o texto
+                # dele "colado" no proximo turno — e um turno vazio passaria por
+                # saudavel, escondendo justamente a falha que queremos pegar.
+                if not self._interrupted:
+                    self._iniciar_turno()
                 try:
                     await self.ws.send_json({
                         "type": "transcript",
@@ -2020,14 +2115,24 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
 
             # (a transcricao do usuario ja foi tratada ANTES do portao acima)
             if sc.output_transcription and sc.output_transcription.text:
-                try:
-                    await self.ws.send_json({
-                        "type": "transcript",
-                        "speaker": "Charon",
-                        "text": sc.output_transcription.text,
-                    })
-                except Exception:
-                    pass
+                bruto = sc.output_transcription.text
+                # Sintoma de geracao degenerada: o token de controle do Gemini
+                # vazou como texto (ver _TOKEN_CONTROLE no topo do arquivo).
+                if _TOKEN_CONTROLE.search(bruto):
+                    self._turno_tokens_controle += 1
+                limpo = _limpar_tokens_controle(bruto)
+                # Texto que sobra e texto de verdade. Se o pedaco era SO token,
+                # nao mandamos nada — antes o usuario via "<ctrl46>" no painel.
+                if limpo:
+                    self._turno_texto_real += limpo
+                    try:
+                        await self.ws.send_json({
+                            "type": "transcript",
+                            "speaker": "Charon",
+                            "text": limpo,
+                        })
+                    except Exception:
+                        pass
             if sc.turn_complete:
                 # Espera os ultimos chunks do Gemini chegarem antes de fechar
                 # o turno. Antes eram 500ms fixos, o que as vezes cortava a
@@ -2046,6 +2151,8 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
                     await self.ws.send_json({"type": "turn_complete"})
                 except Exception:
                     pass
+                # Fim do turno: decide se foi saudavel ou se precisa recuperar.
+                await self._fechar_turno()
 
         if response.tool_call:
             fn_responses = []
@@ -2074,6 +2181,93 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
                 await self.session.send_tool_response(function_responses=fn_responses)
             except Exception as e:
                 print(f"[VoiceWS] Erro ao enviar tool_response: {e}")
+
+    def _iniciar_turno(self):
+        """Zera os contadores de saude do turno (chamado quando um turno novo comeca)."""
+        self._turno_aberto = True
+        self._turno_bytes_audio = 0
+        self._turno_texto_real = ""
+        self._turno_tokens_controle = 0
+
+    async def _fechar_turno(self, texto_real: str | None = None, bytes_audio: int | None = None,
+                            tokens_controle: int | None = None):
+        """
+        Avalia a SAUDE do turno que acabou e recupera quando ele nasceu morto.
+
+        O caso real (relatado pelo usuario): o Gemini fecha o turno com ZERO voz
+        e o unico texto que veio foi um token de controle (`<ctrl46>`). Nao e uma
+        resposta — e uma geracao degenerada. Sem isto, o Charon simplesmente
+        "para de responder" e nunca volta, porque nao houve erro nenhum para
+        disparar a reconexao automatica.
+
+        Escalonamento (do barato para o caro):
+          1a falha  -> pede para o usuario repetir. Uma sessao nova custa ~2 s de
+                       silencio e o estado da conversa fica no servidor.
+          2a falha  -> a sessao do Gemini esta corrompida: reconecta.
+        """
+        texto = self._turno_texto_real if texto_real is None else texto_real
+        audio = self._turno_bytes_audio if bytes_audio is None else bytes_audio
+        tokens = self._turno_tokens_controle if tokens_controle is None else tokens_controle
+
+        self._turno_aberto = False
+        self._turno_bytes_audio = 0
+        self._turno_texto_real = ""
+        self._turno_tokens_controle = 0
+
+        # Turno interrompido pelo usuario (barge-in) fecha sem audio de proposito
+        # — nao e falha, e o comportamento pedido.
+        if self._interrupted or self._recuperando:
+            return
+
+        saudavel = bool(texto) or audio > 0
+        if saudavel:
+            self._falhas_turno = 0
+            return
+
+        self._falhas_turno += 1
+        print(f"[VoiceWS] TURNO VAZIO ({self._falhas_turno}x): zero audio, zero texto, "
+              f"{tokens} token(s) de controle vazado(s)")
+        if self._falhas_turno >= 2:
+            await self._recuperar_turno(modo="reconectar")
+        else:
+            await self._recuperar_turno(modo="pedir_de_novo")
+
+    async def _recuperar_turno(self, modo: str = "pedir_de_novo"):
+        """Tira o Charon do estado mudo: pede de novo ou reabre a sessao."""
+        self._recuperando = True
+        try:
+            try:
+                await self.ws.send_json({
+                    "type": "status",
+                    "message": "Nao consegui responder — repetindo..." if modo == "pedir_de_novo"
+                               else "Sessao de voz reiniciada",
+                })
+            except Exception:
+                pass
+
+            if modo == "reconectar":
+                print("[VoiceWS] Recuperacao: reabrindo sessao (estado do Gemini corrompido)")
+                self._falhas_turno = 0
+                self._turno_aberto = False
+                self._recuperando = False
+                await self._reconnect(restaurar_contexto=True)
+                return
+
+            if not self.session or not self._running:
+                return
+            self._turn_done_event.clear()
+            try:
+                await self.session.send_client_content(
+                    turns={"parts": [{"text": (
+                        "Sua resposta anterior nao saiu (falha tecnica). "
+                        "Responda de novo, em UMA frase curta, o que eu acabei de pedir."
+                    )}]},
+                    turn_complete=True,
+                )
+            except Exception as e:
+                print(f"[VoiceWS] Falha ao pedir repeticao: {e}")
+        finally:
+            self._recuperando = False
 
     async def _receive_loop(self):
         """Escuta respostas do Gemini continuamente."""
@@ -2154,8 +2348,16 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             return
         await self._reconnect()
 
-    async def _reconnect(self):
-        """Reconecta ao Gemini Live quando a sessao expira."""
+    async def _reconnect(self, restaurar_contexto: bool = False):
+        """
+        Reconecta ao Gemini Live quando a sessao expira.
+
+        `restaurar_contexto` reenvia o historico como contexto e pede a retomada
+        curta. Usado quando a sessao foi reaberta por GERACAO DEGENERADA (o
+        `<ctrl46>`): sem isto o Charon voltaria a responder, mas sem lembrar da
+        conversa que estava em andamento. Nas reconexoes por falha de rede o
+        contexto ja se perdeu do mesmo jeito, entao tambem vale a pena.
+        """
         if not self._running or self._reconnecting:
             return
         self._reconnecting = True
@@ -2193,7 +2395,12 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
                 response_modalities=["AUDIO"],
                 output_audio_transcription={},
                 input_audio_transcription={},
-                system_instruction=_build_system_instruction(self._voice),
+                system_instruction=_build_system_instruction(
+                    self._voice,
+                    user_tz=getattr(self, "_user_tz", "America/Sao_Paulo"),
+                    user_locale=getattr(self, "_user_locale", "pt-BR"),
+                    extra_prompt=getattr(self, "_extra_prompt", ""),
+                ),
                 tools=[types.Tool(function_declarations=_get_active_tools())],
                 session_resumption=types.SessionResumptionConfig(),
                 context_window_compression=types.ContextWindowCompressionConfig(
@@ -2220,6 +2427,12 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             except Exception:
                 pass
             self._reconnecting = False
+
+            # Devolve o contexto da conversa (opcional, ver docstring).
+            if restaurar_contexto:
+                turnos = await self._enviar_historico()
+                if turnos:
+                    await self._pedir_retomada(turnos)
 
         except Exception as e:
             self._reconnecting = False

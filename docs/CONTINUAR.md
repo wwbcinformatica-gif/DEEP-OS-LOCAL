@@ -1,6 +1,6 @@
 # DEEP-OS — Como continuar (handoff)
 
-**Atualizado:** 2026-09-12, fim da sessão 49
+**Atualizado:** 2026-09-12, sessão 50 (Charon: `<ctrl46>`, escolha de contexto)
 
 Este arquivo existe para que **outro modelo de IA continue o trabalho sem
 depender do histórico da conversa**. Leia isto primeiro, depois `memory.md`.
@@ -103,20 +103,118 @@ Regras 25 a 56 no `memory.md`.
 
 ---
 
-## 5. O que está PENDENTE
+## 5. O que foi resolvido na sessão 50 (não refaça)
 
-### 5.1 Falta testar (depende do usuário, precisa dele)
+Sessão focada no **Charon** (voz). Três coisas, todas com teste próprio:
 
+### 5.1 `<ctrl46>` — o Charon "para de responder e não retorna"
+
+**O relato (print do painel do usuário):**
+
+```
+⚡ Charon  19:33:17  <ctrl46>
+⚡ Charon  19:33:17  <ctrl46>
+```
+
+…e daí não saía nada. Não era sempre — "às vezes".
+
+**O que era.** `<ctrl46>` **não é texto do DEEP-OS**: é um *token de controle*
+interno do Gemini (`<ctrlN>`). Nos modelos Live *preview* a geração às vezes
+degenera, o token **vaza como texto** na `output_transcription` e o turno fecha
+com **zero voz e zero texto real**. Como **não havia erro nenhum**, nada
+disparava a reconexão automática: ele ficava mudo para sempre.
+
+**O que foi feito (em `backend/routes/voice_ws.py`):**
+
+1. `_TOKEN_CONTROLE` + `_limpar_tokens_controle()` — o token é **filtrado** e
+   nunca mais chega ao painel;
+2. contadores de saúde **por turno** (`_turno_bytes_audio`, `_turno_texto_real`,
+   `_turno_tokens_controle`) e `_iniciar_turno()`;
+3. `_fechar_turno()` — turno que fecha sem áudio e sem texto é **falha
+   detectada**:
+   - **1ª falha** → `_recuperar_turno('pedir_de_novo')`: pede ao modelo para
+     responder de novo;
+   - **2ª falha seguida** → `_recuperar_turno('reconectar')`: **reabre a sessão**
+     (estado do Gemini corrompido) e reenvia o contexto (`restaurar_contexto=True`);
+4. **barge-in não conta como falha** (turno interrompido fecha sem áudio de
+   propósito) e turno com áudio zera o contador.
+
+**Bug sério achado de quebra:** `_reconnect()` montava a instrução do sistema
+**só com a voz** — sem fuso, idioma e **sem as instruções personalizadas** (de
+onde vem o nome do usuário). Ou seja: **toda reconexão fazia o Charon esquecer
+quem era o usuário**. Agora `start()` guarda `_user_tz` / `_user_locale` /
+`_extra_prompt` e a reconexão reusa.
+
+Teste: `tests-manual/test_charon_barge_in.py`, seção 8 (comportamental, instancia
+a sessão de verdade e reproduz o turno só com `<ctrl46>`).
+
+### 5.2 Charon não inicia sozinho — o usuário ESCOLHE o contexto
+
+**Pedido literal:** *"quando clicar no menu charon eu escolho do lado direito no
+workspace novo chat ou clico em algum historico registrado das conversas
+anteriores para que ele ja comece com um novo contexto ou com aquele contexto
+salvo do historico selecionado, igual aqui no nosso painel DSH LOCAL"*;
+*"não faz nenhuma das duas até eu escolher"*; e:
+
+> "exemplo 1 nova conversa → charon ja começa automaticamente
+> 2 se eu escolher um dos historicos ele ja começa sabendo de todo o conteudo
+> daquele historico e ja pergunta de onde quer continua"
+
+**Antes:** ao abrir a página o Charon **ligava sozinho** (timer de 1 s + listener
+do primeiro gesto) e cumprimentava, sem o usuário ter escolhido nada.
+
+**Agora (`frontend/src/components/saas/CharonPage.tsx`):**
+
+- **auto-start removido** (timer e listeners de gesto);
+- novo estado `modoInicio: 'escolher' | 'novo' | 'historico'` — a página abre em
+  **`'escolher'`** e o Charon fica **parado**;
+- tela de escolha no painel direito (e um `+ Novo chat` **explícito** no topo da
+  árvore, ao lado dos workspaces — antes era um `+` solto no canto que passava
+  despercebido);
+- **`+ Novo chat`** → `createConversation(..., assistantName)` + conecta
+  **automaticamente**, sem histórico → o backend **cumprimenta**;
+- **clique numa sessão da árvore** → carrega `getTranscripts(convId)`, manda como
+  `history` e **reconecta** → o backend reenvia o contexto e **pergunta de onde
+  continuar**;
+- `entrarNaConversa()` centraliza "trocar contexto = reconectar" (usado pelos
+  dois caminhos);
+- apagar a conversa em uso volta para a tela de **escolha** (não liga sozinho).
+
+No backend, `_pedir_retomada()` foi reescrito para **terminar com uma pergunta
+sobre o histórico** ("de onde quer continuar"), continuando proibido se
+reapresentar ou resumir tudo.
+
+Teste: `tests-manual/test_charon_historico.py`, seção 7.
+
+### 5.3 `TranscriptEntry` duplicado no CharonPage
+
+Havia um `interface TranscriptEntry` **local** (mesmos 3 campos) sombreando o
+tipo importado do `chatStorage` → erro `TS2440`. Removido: **um lugar só**.
+(É a armadilha nº 0 deste documento acontecendo de novo.)
+
+---
+
+## 6. O que está PENDENTE
+
+### 6.1 Falta testar (depende do usuário, precisa dele)
+
+- **Charon: a tela de escolha** (novo em 4.2). Abrir o Charon e conferir que ele
+  **não liga sozinho**; clicar em `+ Novo chat` e ouvir a saudação; clicar numa
+  sessão da árvore e conferir que ele **começa sabendo daquele assunto e pergunta
+  de onde continuar**. Nada disso foi verificado com microfone real.
+- **Charon: o `<ctrl46>`** (4.1). O teste prova a lógica com turno simulado, mas
+  só o uso real confirma que a recuperação pega o caso de verdade.
 - **Voz do Charon com microfone**: saudação curta e interrupção falando por
   cima. Nada disso foi verificado com áudio real — eu não consigo.
-- **Firefox**: microfone (a permissão foi bloqueada pelo auto-start antigo).
+- **Firefox**: microfone (a permissão foi bloqueada pelo auto-start antigo — que
+  agora **não existe mais**, então vale retestar; o clique em `+ Novo chat` ou na
+  sessão já é o gesto que o Firefox exige).
 - **Lembretes** ponta a ponta pela interface; **PIX/QRCode**; conversas e
   documentos.
-- **Workspaces e download do histórico** (acabou de ser implementado): abrir
-  uma conversa antiga e conferir se as mensagens voltam; clicar na seta e
-  conferir o `.md`.
+- **Workspaces e download do histórico**: abrir uma conversa antiga e conferir se
+  as mensagens voltam; clicar na seta e conferir o `.md`.
 
-### 5.2 Problema conhecido, NÃO corrigido
+### 6.2 Problema conhecido, NÃO corrigido
 
 **O erro de uma tentativa recuperada aparece como se fosse o resultado.**
 No print do usuário, o painel central mostrou `Erro na API: 429` (cota do
@@ -130,7 +228,7 @@ existir. Se o erro chega depois do `done`, ele permanece.
 
 ---
 
-### 5.2.1 ⚠️ MAIS GRAVE: o modelo INVENTA o ambiente quando não tem ferramentas
+### 6.2.1 ⚠️ MAIS GRAVE: o modelo INVENTA o ambiente quando não tem ferramentas
 
 **O que aconteceu (2026-09-12, 18:04).** O usuário escreveu `"ola groq"` — uma
 saudação, então **corretamente** o DEEP-OS não ofereceu ferramentas. O modelo
@@ -172,7 +270,7 @@ Assim a regressão é pega por teste, não por print do usuário.
 
 ---
 
-### 5.2.2 A cota gratuita do Gemini (5 req/min) inviabiliza tarefas
+### 6.2.2 A cota gratuita do Gemini (5 req/min) inviabiliza tarefas
 
 Com `gemini-2.5-flash` no plano gratuito o limite é **5 requisições por minuto**,
 e o loop de tarefas faz **uma por passo**. Uma pergunta que executa 4 comandos
@@ -186,7 +284,7 @@ conversa.
 (respeitando o `retryDelay` que a própria resposta traz) em vez de devolver o erro
 cru como texto na conversa.
 
-### 5.3 Segurança (depende do usuário — não são bugs)
+### 6.3 Segurança (depende do usuário — não são bugs)
 
 - Trocar a **senha de root do VPS** (foi exposta em conversa).
 - Trocar o **`MASTER_PASSWORD`** (ainda é `admin123@`).
@@ -194,7 +292,7 @@ cru como texto na conversa.
 - `systemctl mask deep-os-backend` — blinda a unit duplicada que já brigou pela
   porta 8001.
 
-### 5.4 Chaves que precisam de ação do usuário
+### 6.4 Chaves que precisam de ação do usuário
 
 | Provedor | Situação |
 |---|---|
@@ -213,7 +311,7 @@ DEEP-OS usa como padrão e não tem a cota apertada do Gemini grátis.
 
 ---
 
-## 6. Armadilhas que já custaram tempo (leia antes de editar)
+## 7. Armadilhas que já custaram tempo (leia antes de editar)
 
 0. **⚠️ A PIOR: código duplicado — corrija nos DOIS (ou nos TRÊS) lugares.**
    Já causou quatro bugs nesta sessão, todos do mesmo tipo: eu conserto um lugar
@@ -254,10 +352,21 @@ DEEP-OS usa como padrão e não tem a cota apertada do Gemini grátis.
 10. **Efeito que carrega e efeito que salva, ambos dependendo do mesmo id, rodam
     no MESMO commit** — e o de salvar enxerga o estado ANTERIOR. É a corrida que
     apagou histórico duas vezes (Jarvis e Charon). Trave com um `useRef`.
+11. **Tipo/constante duplicado em dois arquivos sombreia o importado.** O
+    `CharonPage.tsx` tinha um `interface TranscriptEntry` local igual ao do
+    `chatStorage` → `TS2440`, e uma mudança no formato gravado não alcançava o
+    arquivo. Se `tsc` acusar "conflicts with local declaration", é isto.
+12. **Recuperar de turno vazio não pode confundir com barge-in.** Turno
+    interrompido fecha sem áudio **de propósito** — se contar como falha, o
+    Charon reabre sessão toda vez que o usuário fala por cima. Ver `_fechar_turno`.
+13. **Ao fechar um turno sem `turn_complete`, o texto do turno fica "colado" no
+    próximo** — e um turno vazio passaria por saudável, escondendo a falha. Por
+    isso `_iniciar_turno()` é chamado também quando o usuário começa a falar
+    (`send_audio` com silêncio > 0,5 s e `input_transcription`).
 
 ---
 
-## 7. Como o usuário trabalha (para não atrapalhar)
+## 8. Como o usuário trabalha (para não atrapalhar)
 
 - Ele **roda os comandos no VPS** e cola a saída. O console da Hostinger
   **embaralha textos longos** → mande blocos de 2-3 linhas.

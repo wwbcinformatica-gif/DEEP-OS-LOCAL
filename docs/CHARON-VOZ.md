@@ -320,17 +320,95 @@ orientacao de documentos com link de download, bloco de **modo headless** e
 nao houver tenant. O cache de 5 s existe **apenas** no caminho global —
 cachear por tenant vazaria identidade entre assinantes.
 
+**Guardado para a reconexao.** `start()` guarda `_user_tz`, `_user_locale` e
+`_extra_prompt` na sessao, e `_reconnect()` **reusa** os tres. Antes a reconexao
+montava a instrucao **so com a voz** — sem fuso, sem idioma e **sem as instrucoes
+personalizadas** (de onde vem o nome do usuario). Resultado: **toda reconexao
+fazia o Charon esquecer quem era o usuario**.
+
+### 7.7 ⚠️ Turno que nasce MORTO — o `<ctrl46>`
+
+**Sintoma (relatado):** o painel mostrava `<ctrl46>` uma ou duas vezes e o Charon
+**nunca mais respondia**. Acontecia "às vezes".
+
+`<ctrl46>` **nao e texto do DEEP-OS**. E um **token de controle** interno do
+Gemini (familia `<ctrlN>`). Nos modelos Live *preview* a geracao as vezes
+degenera, o token **vaza como texto** na `output_transcription` e o turno fecha
+com **zero voz e zero texto real**.
+
+**Por que era pior que um erro comum:** **nao havia erro nenhum.** O websocket
+seguia vivo, o keepalive respondia, nada disparava a reconexao automatica — ele
+ficava **mudo para sempre**.
+
+**Como esta tratado:**
+
+1. `_TOKEN_CONTROLE` (`<\s*ctrl\s*\d+\s*>`) + `_limpar_tokens_controle()` —
+   filtrado; se o pedaco era **so** token, nada vai para o painel;
+2. contadores de saude **por turno**: `_turno_bytes_audio`,
+   `_turno_texto_real`, `_turno_tokens_controle`, zerados por `_iniciar_turno()`;
+3. `_fechar_turno()` roda no `turn_complete`:
+
+| Situacao | Acao |
+|---|---|
+| turno com audio ou texto real | zera `_falhas_turno` |
+| turno vazio **e** `_interrupted` | **nao e falha** (barge-in fecha sem audio de proposito) |
+| 1º turno vazio | `_recuperar_turno('pedir_de_novo')` — pede a resposta de novo |
+| 2º turno vazio seguido | `_recuperar_turno('reconectar')` — reabre a sessao com `restaurar_contexto=True` |
+
+**Armadilha:** um turno que fecha **sem `turn_complete`** (interrupcao, evento
+perdido) deixa o texto "colado" no proximo — e um turno vazio passaria por
+saudavel, escondendo a falha. Por isso `_iniciar_turno()` tambem roda quando o
+usuario **comeca a falar** (`send_audio` com silencio > 0,5 s e
+`input_transcription`).
+
+**Logs para confirmar:** `[VoiceWS] TURNO VAZIO (Nx): zero audio, zero texto,
+N token(s) de controle vazado(s)` e `[VoiceWS] Recuperacao: reabrindo sessao
+(estado do Gemini corrompido)`.
+
+### 7.8 Como a sessao COMECA (o usuario escolhe)
+
+Ate a sessao 50 a pagina ligava o Charon **sozinha** (timer de 1 s + listener do
+primeiro gesto) e ele cumprimentava sem ninguem pedir.
+
+Agora **nao ha auto-start**. O estado `modoInicio`
+(`'escolher' | 'novo' | 'historico'`) abre em **`'escolher'`** e o Charon fica
+parado. A escolha:
+
+| Escolha | O que acontece |
+|---|---|
+| **`+ Novo chat`** (topo da arvore) | cria a sessao e **conecta sozinho**, sem `history` → o backend manda `_send_startup_briefing()` → ele **cumprimenta** |
+| **Clique numa sessao da arvore** | carrega `getTranscripts(convId)`, manda como `history` e **reconecta** → `_abrir_sessao()` → `_enviar_historico()` + `_pedir_retomada()` → ele **retoma o contexto e pergunta de onde continuar** |
+
+`entrarNaConversa()` centraliza "trocar contexto = **reconectar**" (o estado da
+conversa vive no servidor do Gemini **por sessao** — nao ha como "rebobinar").
+O clique da escolha e tambem o **gesto que o Firefox exige** para liberar
+`AudioContext` e microfone: com o auto-start isso era feito sem gesto, e o
+Firefox memorizava a negativa como bloqueio do site.
+
+### 7.9 Historico de contexto: os limites
+
+- O frontend guarda **por conversa** (`transcripts_<id>`, ultimas **300**
+  entradas) e envia tudo em `history`.
+- O backend corta em `MAX_HISTORICO_TURNOS = 40` e
+  `MAX_HISTORICO_CHARS = 12000`, **sempre pelo FIM** da conversa (o final e o que
+  da continuidade real).
+- Falas consecutivas do mesmo papel sao juntadas (o Gemini espera turnos
+  alternados) e o primeiro turno **precisa** ser do usuario.
+- O papel do assistente no Live e **`model`**, nao `assistant`.
+- O registro e do **navegador** (localStorage, por tenant) — nao esta no VPS.
+
 ## 8. Diagnostico (o que olhar quando algo falha)
 
 ### 8.1 Console do navegador (F12)
 ```
-[Charon] Sem interacao do usuario ainda — o microfone sera pedido no primeiro clique
-[Charon] Auto-start ( gesto do usuario )
 [Charon] AudioContext do mic: running | sampleRate real: 48000
 [Charon] Microfone ativo. AudioContext state: running | sampleRate: 48000
 [Charon] Microfone indisponivel: DOMException: ...     + motivo detalhado
 ```
 Nunca aparecer: `AudioContext do mic: suspended` (o mic nao vai enviar audio).
+
+> `[Charon] Auto-start ( gesto do usuario )` **nao existe mais** (sessao 50): a
+> pagina nao liga sozinha. Se voce vir essa linha, o auto-start voltou.
 
 ### 8.2 Logs do backend
 ```bash
@@ -348,12 +426,15 @@ Linhas uteis:
 | Sintoma | Onde olhar |
 |---|---|
 | Charon "ouvindo" mas nao responde | mic: `AudioContext` suspenso / permissao |
+| **Fica parado, nao fala nada ao abrir** | **comportamento novo**: nao ha auto-start; escolha `+ Novo chat` ou uma sessao |
+| **Mostra `<ctrl46>` e nunca volta** | turno degenerado — ver 7.7 (`TURNO VAZIO` no log) |
 | Engasgo no meio da frase | ring esvaziando; ver delays no log |
 | Corta as ultimas letras | `_prebuf`/ring/tail grace; sub-run |
 | Responde mas sem voz | playback suspenso; ver `setupPlayback` |
 | WebSocket nao conecta | nginx: `proxy_http_version 1.1` + `Upgrade` |
 | Reconecta em loop | `_sessions` encerrando a sessao anterior |
 | Fala com voz/nome de outro | ordem de rotas do `/api/config` (catch-all) |
+| **"Nao lembra da conversa anterior"** | e a sessao do Gemini, nao o storage: o historico so vai quando o usuario **escolhe** a conversa (7.8) |
 
 ### 8.4 Testes sem navegador (backend)
 ```bash

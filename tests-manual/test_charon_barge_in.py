@@ -239,6 +239,95 @@ try:
 
     asyncio.run(cenario())
 
+    # ── 8. CHARON MUDO: o turno que nasce morto com `<ctrl46>` ──────────────
+    #
+    # RELATO DO USUARIO (painel dele): "as vezes fica assim -> <ctrl46> e nao
+    # retorna". O Gemini fechou o turno com ZERO voz e o unico "texto" foi o
+    # token de controle. Nao havia erro nenhum, entao a reconexao automatica
+    # nunca disparava: o Charon ficava mudo para sempre.
+    class SessaoFalsa:
+        """Sessao do Gemini de mentira: registra o que foi pedido a ela."""
+
+        def __init__(self):
+            self.pedidos = []
+
+        async def send_client_content(self, turns=None, turn_complete=False):
+            self.pedidos.append((turns, turn_complete))
+
+    async def cenario_mudo():
+        ws = WsFalso()
+        s = VoiceSession(ws)
+        s._running = True
+        s.session = SessaoFalsa()
+
+        # 8a. O token de controle NAO pode aparecer no painel do usuario.
+        await s._handle_response(resposta(texto_saida="<ctrl46>"))
+        falas = [m for m in ws.json_enviados if m.get("type") == "transcript"]
+        check(not falas,
+              "o token <ctrl46> NAO e exibido como fala do Charon",
+              "o usuario continua vendo '<ctrl46>' no painel")
+        check(s._turno_tokens_controle == 1,
+              "o token vazado e contado como sintoma de geracao degenerada",
+              "o vazamento nao foi contado — a recuperacao nao dispararia")
+
+        # 8b. Se texto real vier junto do token, so o texto vai para o painel.
+        ws.json_enviados.clear()
+        await s._handle_response(resposta(texto_saida="Bom dia<ctrl46> Wilson"))
+        falas = [m["text"] for m in ws.json_enviados if m.get("type") == "transcript"]
+        check(falas == ["Bom dia Wilson"],
+              "um turno misto mostra apenas o texto real",
+              f"o painel recebeu {falas!r}")
+        # Fecha o turno (tem texto real -> saudavel, nao recupera).
+        await s._handle_response(resposta(turn_complete=True))
+
+        # 8c. Turno fechado SEM audio e SEM texto: pede para responder de novo.
+        s.session.pedidos.clear()
+        ws.json_enviados.clear()
+        await s._handle_response(resposta(texto_saida="<ctrl46>"))
+        await s._handle_response(resposta(turn_complete=True))
+        check(len(s.session.pedidos) == 1,
+              "turno vazio faz o backend PEDIR a resposta de novo",
+              "o backend nao reage ao turno vazio — o Charon fica mudo")
+        check("Responda de novo" in s.session.pedidos[0][0]["parts"][0]["text"],
+              "o pedido de repeticao e explicito",
+              "o texto enviado ao modelo nao pede repeticao")
+
+        # 8d. Segundo turno vazio seguido: a sessao esta corrompida -> reconecta.
+        reconexoes = []
+
+        async def reconnect_falso(restaurar_contexto=False):
+            reconexoes.append(restaurar_contexto)
+
+        s._reconnect = reconnect_falso
+        await s._handle_response(resposta(texto_saida="<ctrl46>"))
+        await s._handle_response(resposta(turn_complete=True))
+        check(len(reconexoes) == 1 and reconexoes[0] is True,
+              "duas falhas seguidas reabrem a sessao (com o contexto de volta)",
+              "o Charon insistiria para sempre na mesma sessao corrompida")
+
+        # 8e. Um turno com audio de verdade zera o contador de falhas.
+        s2 = VoiceSession(WsFalso())
+        s2._running = True
+        s2.session = SessaoFalsa()
+        s2._falhas_turno = 1
+        await s2._handle_response(resposta(data=b"\x00\x01" * 50))
+        await s2._handle_response(resposta(turn_complete=True))
+        check(s2._falhas_turno == 0,
+              "um turno saudavel zera o contador de falhas",
+              "o contador de falhas nunca zera (reconectaria sem motivo)")
+
+        # 8f. Turno INTERROMPIDO fecha sem audio de proposito: nao e falha.
+        s3 = VoiceSession(WsFalso())
+        s3._running = True
+        s3.session = SessaoFalsa()
+        s3._interrupted = True
+        await s3._handle_response(resposta(turn_complete=True))
+        check(s3._falhas_turno == 0,
+              "barge-in nao e confundido com turno vazio",
+              "interromper o Charon dispararia uma 'recuperacao'")
+
+    asyncio.run(cenario_mudo())
+
 except ImportError as e:
     print(f"   PULADO  nao consegui importar voice_ws ({e})")
     print("           (dependencia ausente — os testes estaticos acima ja cobrem o texto)")

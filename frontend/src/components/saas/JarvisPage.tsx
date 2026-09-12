@@ -454,6 +454,12 @@ const JarvisPage: React.FC = () => {
   const [selectedVoice, setSelectedVoice] = useState(tenantGet('jarvis_voice') || 'jarvis-cinematic');
   const [instances, setInstances] = useState<any[]>([]);
   const [selectedInstanceId, setSelectedInstanceId] = useState(tenantGet('jarvis_instance_id') || '');
+  // Nome do assistente configurado em Configuracoes -> Identidade.
+  // Usado para nomear a sessao nova ("Jarvis", "Jarvis 2", ...), do mesmo jeito
+  // que o Charon faz. O ref evita closure velha dentro dos callbacks.
+  // O padrao desta pagina e "Jarvis" (o do Charon e "DEEP-OS").
+  const [assistantName, setAssistantName] = useState(tenantGet('jarvis_assistant_name') || 'Jarvis');
+  const assistantNameRef = useRef(tenantGet('jarvis_assistant_name') || 'Jarvis');
   const [instanceConfig, setInstanceConfig] = useState<any>(null);
   const [dynamicModels, setDynamicModels] = useState<{id: string, label: string, hasVision?: boolean}[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -604,6 +610,24 @@ const JarvisPage: React.FC = () => {
       saveTranscripts(activeConvId, transcripts);
     }
   }, [transcripts, activeConvId]);
+
+  useEffect(() => {
+    // Nome do assistente vem de Configuracoes -> Identidade (mesma fonte do Charon).
+    // Fallback: o que ja ficou gravado no tenant.
+    const token = tenantGet('saas_token') || localStorage.getItem('saas_token');
+    fetch('/api/config/identity', {
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const name = data.assistant_name || 'DEEP-OS';
+        setAssistantName(name);
+        assistantNameRef.current = name;
+        tenantSet('jarvis_assistant_name', name);
+      })
+      .catch(() => { /* mantem o valor gravado no tenant */ });
+  }, []);
 
   useEffect(() => {
     const savedKey = tenantGet('saas_api_key') || '';
@@ -983,7 +1007,7 @@ const JarvisPage: React.FC = () => {
     // O Jarvis abre SEM conversa ativa (para comecar limpo). A conversa e criada
     // aqui, na primeira mensagem, ja dentro do workspace ativo.
     if (!activeConvId) {
-      const conv = createConversation(text.trim(), workspaceAtivo);
+      const conv = createConversation(text.trim(), workspaceAtivo, assistantNameRef.current || 'Jarvis');
       setConversations(getConversations());
       setTodosWorkspaces(getWorkspaces());
       // Avisa o efeito de carregar para nao mexer nas mensagens nesta troca
@@ -1210,7 +1234,7 @@ const JarvisPage: React.FC = () => {
 
   const newConversation = () => {
     // A conversa nova nasce no workspace ativo (a raiz escolhida na barra)
-    const conv = createConversation(undefined, workspaceAtivo);
+    const conv = createConversation(undefined, workspaceAtivo, assistantNameRef.current || 'Jarvis');
     setConversations(getConversations());
     setTodosWorkspaces(getWorkspaces());
     setActiveConvId(conv.id);

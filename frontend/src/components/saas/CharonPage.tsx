@@ -9,11 +9,12 @@ import {
   tenantGet, tenantSet, migrateLegacyData,
 } from './chatStorage';
 
-interface TranscriptEntry {
-  speaker: string;
-  text: string;
-  time: string;
-}
+// NOTA: `TranscriptEntry` vem do chatStorage (linha de import acima).
+//
+// Havia aqui um `interface TranscriptEntry` LOCAL com os mesmos tres campos, o
+// que sombreava o tipo importado e gerava o erro TS2440 "Import declaration
+// conflicts with local declaration". Com o tipo duplicado, uma mudanca no
+// formato gravado nao alcancava este arquivo. Um lugar so.
 
 const VOICES = [
   { id: 'Charon', label: 'Charon', type: 'Masculino (padrao)' },
@@ -312,6 +313,27 @@ const CharonPage: React.FC = () => {
   // Ultimo instante em que o usuario mexeu no microfone (para o watchdog).
   const lastSendTimeRef = useRef<number>(0);
 
+  // ── Estado de escolha do contexto ────────────────────────────────────────
+  //
+  // PEDIDO DO USUARIO: "quando clicar no menu charon eu escolho do lado direito
+  // no workspace novo chat ou clico em algum historico registrado das conversas
+  // anteriores para que ele ja comece com um novo contexto ou com aquele
+  // contexto salvo do historico selecionado, igual aqui no nosso painel DSH".
+  //
+  // E ainda: "nao faz nenhuma das duas ate eu escolher" e "clicando em nova
+  // conversa o charon deve iniciar com saudacao automatica".
+  //
+  // Ou seja: ao abrir a pagina o Charon NAO liga sozinho (nem cria conversa, nem
+  // pede microfone, nem cumprimenta). Ele fica PARADO esperando uma das duas
+  // escolhas:
+  //   'novo'      -> "+ Novo chat"  -> sessao nova, com saudacao, sem historico
+  //   'historico' -> clique numa sessao da arvore -> reenvia o historico e
+  //                  reconecta, entao ele retoma aquele contexto
+  //   'escolher'  -> ainda nao escolheu: nada de voz
+  const [modoInicio, setModoInicio] = useState<'escolher' | 'novo' | 'historico'>('escolher');
+  // Espelho em ref: o callback de conexao e criado uma vez e leria estado velho.
+  const modoInicioRef = useRef<'escolher' | 'novo' | 'historico'>('escolher');
+
   // ── Contexto da conversa (regra definida pelo usuario) ───────────────────
   //
   //   "sempre for aberto pela primeira vez a sessao deve ser nova, mas quando eu
@@ -413,75 +435,16 @@ const CharonPage: React.FC = () => {
         userNameRef.current = savedUser;
       });
 
-    // Auto-start: Charon ativa quando a pagina carrega.
+    // NAO ha mais auto-start.
     //
-    // CUIDADO (Firefox): o Firefox exige GESTO do usuario para liberar audio
-    // (AudioContext e getUserMedia). Se tentarmos conectar sozinhos no load,
-    // o contexto fica 'suspended' e o microfone captura silencio — o Charon
-    // aparece "ouvindo" mas nao recebe nada.
+    // ANTES: a pagina tentava ligar sozinha (timer de 1s + listener do primeiro
+    // gesto), e por isso o Charon abria falando sem o usuario ter pedido nada.
+    // O pedido atual e explicito: "nao faz nenhuma das duas ate eu escolher".
     //
-    // Por isso, alem do timer, armamos um listener de primeira interacao:
-    // no Firefox o clique/tecla do usuario e o que destrava o audio.
-    // O timer so dispara se a pagina tiver foco e o navegador permitir.
-    let autoStartFeito = false;
-
-    const limparGatilhos = () => {
-      window.removeEventListener('pointerdown', onPrimeiroGesto);
-      window.removeEventListener('keydown', onPrimeiroGesto);
-      window.removeEventListener('touchstart', onPrimeiroGesto);
-    };
-
-    function onPrimeiroGesto() {
-      tentarAutoStart('gesto do usuario');
-    }
-
-    function tentarAutoStart(motivo: string) {
-      if (autoStartFeito || startedRef.current) return;
-      autoStartFeito = true;
-      limparGatilhos();
-      console.log('[Charon] Auto-start (', motivo, ')');
-      connectVoiceRef.current().catch(() => {
-        setError('Clique em "Charon" para ativar');
-        setVoiceStatus('idle');
-        startedRef.current = false;
-      });
-    }
-
-    // No Firefox, so tentamos sozinhos se o navegador JA registrou interacao
-    // do usuario nesta pagina. Caso contrario, esperamos o gesto.
-    //
-    // `navigator.userActivation.hasBeenActive` e a checagem correta (Firefox 79+,
-    // Chrome 72+). Tentar getUserMedia sem isso faz o Firefox responder
-    // NotAllowedError E MEMORIZAR a negativa como bloqueio do site — depois
-    // disso ele nem pergunta mais, mesmo num clique posterior.
-    const jaInteragiu = (() => {
-      try {
-        const ua = (navigator as any).userActivation;
-        if (ua && typeof ua.hasBeenActive === 'boolean') return ua.hasBeenActive;
-      } catch {}
-      return false;
-    })();
-
-    const timerAuto = jaInteragiu
-      ? setTimeout(() => tentarAutoStart('timer — usuario ja interagiu'), 1000)
-      : null;
-
-    window.addEventListener('pointerdown', onPrimeiroGesto, { once: true });
-    window.addEventListener('keydown', onPrimeiroGesto, { once: true });
-    window.addEventListener('touchstart', onPrimeiroGesto, { once: true });
-
-    if (!jaInteragiu) {
-      console.log(
-        '[Charon] Sem interacao do usuario ainda — o microfone sera pedido no ' +
-        'primeiro clique/tecla. (Evita bloquear o mic permanentemente: o Firefox ' +
-        'memoriza uma negativa por falta de gesto.)'
-      );
-    }
-
-    return () => {
-      if (timerAuto) clearTimeout(timerAuto);
-      limparGatilhos();
-    };
+    // Agora o Charon so conecta quando o usuario clica em "+ Novo chat" ou numa
+    // sessao do historico — e esse clique e justamente o GESTO que o Firefox
+    // exige para liberar AudioContext e microfone (nada de getUserMedia sem
+    // gesto, senao o Firefox memoriza a negativa como bloqueio do site).
   }, []);
 
   useEffect(() => {
@@ -1063,25 +1026,57 @@ const CharonPage: React.FC = () => {
     }
 
     setVoiceStatus('listening');
-    addActivity(`Interrompido (${motivo}) — ouvindo voce`, 'system');
+    // Vai para o painel DIREITO (transcricao), nao para o log de atividades.
+    //
+    // PEDIDO DO USUARIO: "estes retornos -> SYSTEM - 19:33:08 Interrompido (voce
+    // falou) - ouvindo voce; nao seria necessario entregar no painel central. se
+    // quiser pode deixar esse retorno no painel direito".
+    //
+    // Faz sentido com a divisao que ele definiu: o painel central e para a
+    // ENTREGA ORGANIZADA (ferramentas, buscas, resultados). Recado de status
+    // como este e ruido ali, e no painel direito ele ate ajuda a entender POR QUE
+    // o Charon parou de falar no meio de uma frase.
+    //
+    // Speaker 'sistema' tem tratamento proprio na renderizacao (cinza, discreto).
+    setTranscripts(prev => [...prev, { speaker: 'sistema', text: `Interrompido (${motivo}) — ouvindo voce`, time: now() }]);
   };
 
   const toggleCharon = () => {
     if (isCharonActive) {
       disconnectVoice();
-    } else {
-      connectVoice();
+      return;
     }
+    // Apertar o Charon tambem e uma ESCOLHA: se ainda nao escolheu o contexto,
+    // entra no modo "novo chat" (saudacao, sem contexto anterior); se ja esta
+    // numa conversa, reconecta NAQUELA conversa, restaurando o historico.
+    if (modoInicioRef.current === 'escolher') {
+      newConversation();
+      return;
+    }
+    if (activeConvId) {
+      // Sessao fechada no meio da conversa: reabre com o contexto dela.
+      const jaAtiva = activeConvId;
+      setActiveConvId(jaAtiva);
+      setRestaurarHistorico(true);
+      restaurarHistoricoRef.current = true;
+      setTranscripts(getTranscripts(jaAtiva));
+      setActivityLog(getActivityLog(jaAtiva));
+      entrarNaConversa('Retomando o contexto desta conversa...');
+      return;
+    }
+    connectVoice();
   };
 
   const sendText = (text: string) => {
     if (!text.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     // Auto-create conversation on first message
     if (!activeConvId) {
-      const conv = createConversation(text.trim(), workspaceAtivo);
+      const conv = createConversation(text.trim(), workspaceAtivo, assistantNameRef.current || 'Charon');
       setConversations(getConversations());
       setTodosWorkspaces(getWorkspaces());
       setActiveConvId(conv.id);
+      modoInicioRef.current = 'novo';
+      setModoInicio('novo');
     }
     wsRef.current.send(JSON.stringify({ type: 'text', text: text.trim() }));
     addUserTranscript(text.trim());
@@ -1184,48 +1179,62 @@ const handleSaveIdentity = async () => {
 };
 
   // ─── Conversation management ───────────────────────────────────
-  const switchConversation = (convId: string) => {
-    const jaAtiva = convId === activeConvId;
-    setActiveConvId(convId);
-    setShowConvMenu(false);
-    // O usuario escolheu uma conversa do historico de proposito: a partir daqui
-    // o Charon deve lembrar dela.
-    setRestaurarHistorico(true);
-    restaurarHistoricoRef.current = true;
 
-    // Se a sessao JA esta aberta, so trocar o estado da tela nao muda nada no
-    // Gemini: o estado da conversa fica no servidor DELE e nao pode ser
-    // "rebobinado". A unica forma confiavel de trocar de contexto e RECONECTAR
-    // — assim a sessao nasce ja com o historico certo.
-    //
-    // Reabrir a conversa que ja esta ativa tambem reconecta: e o gesto natural
-    // de "quero o contexto desta aqui".
+  /**
+   * Entra numa conversa: troca o contexto, limpa o que era da anterior e
+   * RECONECTA (o estado da conversa vive no servidor do Gemini por sessao, entao
+   * nao ha como "rebobinar": a unica troca confiavel de contexto e uma sessao
+   * nova com o historico certo).
+   */
+  const entrarNaConversa = (motivo: string) => {
+    setShowConvMenu(false);
+    setTranscripts([]);
+    setActivityLog([]);
+    setError('');
     if (startedRef.current) {
-      addActivity(
-        jaAtiva
-          ? 'Recarregando o contexto desta conversa...'
-          : 'Trocando de conversa — recarregando o contexto...',
-        'system',
-      );
+      addActivity(motivo, 'system');
       disconnectVoice();
       // Pequeno atraso para o servidor fechar a sessao antiga antes de abrir a
       // nova (o backend tambem derruba sessoes antigas, mas isto evita corrida).
       setTimeout(() => connectVoiceRef.current(), 600);
+    } else {
+      connectVoiceRef.current();
     }
   };
 
+  const switchConversation = (convId: string) => {
+    const jaAtiva = convId === activeConvId;
+    setActiveConvId(convId);
+    // O usuario escolheu uma conversa do historico: o Charon deve lembrar dela.
+    setRestaurarHistorico(true);
+    restaurarHistoricoRef.current = true;
+    modoInicioRef.current = 'historico';
+    setModoInicio('historico');
+    // Carrega o painel com o que estava salvo (o historico enviado ao Gemini e
+    // lido do storage, entao precisa estar consistente na hora de conectar).
+    setTranscripts(getTranscripts(convId));
+    setActivityLog(getActivityLog(convId));
+    entrarNaConversa(
+      jaAtiva
+        ? 'Recarregando o contexto desta conversa...'
+        : 'Trocando de conversa — recarregando o contexto...',
+    );
+  };
+
   const newConversation = () => {
-    // Nasce no workspace ativo (a raiz escolhida na arvore)
-    const conv = createConversation(undefined, workspaceAtivo);
+    // Nasce no workspace ativo (a raiz escolhida na arvore) e com o NOME DO
+    // ASSISTENTE escolhido em Configuracoes > Identidade (pedido do usuario).
+    // Se o nome ja existir, o chatStorage numera ("Charon 2").
+    const conv = createConversation(undefined, workspaceAtivo, assistantNameRef.current || 'Charon');
     setConversations(getConversations());
     setTodosWorkspaces(getWorkspaces());
     setActiveConvId(conv.id);
-    setTranscripts([]);
-    setActivityLog([]);
-    setShowConvMenu(false);
-    // Conversa nova = sessao nova: nada de restaurar nada.
+    // Conversa nova = contexto novo: nada de restaurar nada, o Charon cumprimenta.
     setRestaurarHistorico(false);
     restaurarHistoricoRef.current = false;
+    modoInicioRef.current = 'novo';
+    setModoInicio('novo');
+    entrarNaConversa('Novo chat — sessao nova, sem contexto anterior');
   };
 
   /** Transcripts da conversa ativa no formato que o backend espera. */
@@ -1241,18 +1250,16 @@ const handleSaveIdentity = async () => {
     const remaining = getConversations();
     setConversations(remaining);
     if (activeConvId === convId) {
-      const next = remaining[0];
-      if (next) {
-        setActiveConvId(next.id);
-        setTranscripts(getTranscripts(next.id));
-        setActivityLog(getActivityLog(next.id));
-      } else {
-        const conv = createConversation(undefined, workspaceAtivo);
-        setConversations(getConversations());
-        setTodosWorkspaces(getWorkspaces());
-        setActiveConvId(conv.id);
-        setTranscripts([]);
-        setActivityLog([]);
+      // Apagou a conversa em uso: volta para a ESCOLHA de contexto, sem ligar
+      // o Charon sozinho (mesma regra de quando a pagina abre).
+      setActiveConvId('');
+      setTranscripts([]);
+      setActivityLog([]);
+      modoInicioRef.current = 'escolher';
+      setModoInicio('escolher');
+      if (startedRef.current) {
+        disconnectVoice();
+        addActivity('Conversa excluida — escolha um contexto para continuar', 'system');
       }
     }
   };
@@ -1451,6 +1458,31 @@ const handleSaveIdentity = async () => {
                 de cada uma permite renomear, excluir ou BAIXAR (exporta a
                 transcricao em .md). */}
             <div style={{ borderBottom: '1px solid #1e1e1e', flexShrink: 0, maxHeight: '32vh', overflowY: 'auto' }}>
+              {/* ── AS DUAS ESCOLHAS DE CONTEXTO ────────────────────────────
+                  Pedido do usuario: "eu escolho do lado direito no workspace
+                  novo chat ou clico em algum historico registrado das conversas
+                  anteriores para que ele ja comece com um novo contexto ou com
+                  aquele contexto salvo".
+
+                  Antes o "+" era um caractere solto no canto da barra e passava
+                  despercebido; agora a escolha e explicita e fica no topo da
+                  arvore, junto dos workspaces (igual ao painel do DSH). */}
+              <div
+                onClick={newConversation}
+                title="Comecar uma sessao nova, sem contexto anterior"
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 6,
+                  margin: '6px 8px', padding: '5px 8px', borderRadius: 4,
+                  cursor: 'pointer',
+                  background: modoInicio === 'novo' ? 'rgba(180,120,255,0.16)' : 'rgba(180,120,255,0.07)',
+                  border: `1px solid ${modoInicio === 'novo' ? 'rgba(180,120,255,0.55)' : 'rgba(180,120,255,0.25)'}`,
+                  color: '#c9a6ff', fontSize: 10, fontWeight: 600,
+                }}>
+                <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
+                <span style={{ flex: 1 }}>Novo chat</span>
+                <span style={{ fontSize: 8, color: '#7a6a95', fontWeight: 400 }}>sem contexto</span>
+              </div>
+
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 2px', fontSize: 8, color: '#5a5a5a', letterSpacing: 1, textTransform: 'uppercase' as const }}>
                 <span>workspaces</span>
                 <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{conversations.length}</span>
@@ -1572,7 +1604,34 @@ const handleSaveIdentity = async () => {
             <div ref={rightListRef} style={s.messagesList}>
               {transcripts.length === 0 ? (
                 <div style={s.emptyState}>
-                  {micError ? (
+                  {modoInicio === 'escolher' ? (
+                    // Tela de ESCOLHA: o Charon nao liga sozinho. Pedido do
+                    // usuario: "nao faz nenhuma das duas ate eu escolher".
+                    <div style={{ maxWidth: 460, textAlign: 'left' }}>
+                      <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600, color: '#c9a6ff' }}>
+                        Como voce quer comecar?
+                      </p>
+                      <p style={{ margin: '0 0 14px', fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
+                        O Charon esta parado esperando voce escolher. Ele so liga
+                        depois da escolha — assim nao abre falando sozinho.
+                      </p>
+                      <button onClick={newConversation}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '10px 14px', background: 'rgba(180,120,255,0.14)', color: '#e0d0ff', border: '1px solid rgba(180,120,255,0.45)', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+                        + Novo chat
+                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.75, marginTop: 3 }}>
+                          Sessao nova, sem contexto anterior. Ele cumprimenta e comeca do zero.
+                        </div>
+                      </button>
+                      <button onClick={() => { setActiveTab('chat'); setWsExpandidos(p => ({ ...p, [workspaceAtivo]: true })); }}
+                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'rgba(255,255,255,0.04)', color: '#ccc', border: '1px solid #333', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
+                        &#8635; Continuar uma conversa
+                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.75, marginTop: 3 }}>
+                          Clique numa sessao da arvore ali em cima ({conversations.length} salvas).
+                          O Charon recebe aquele historico e retoma de onde pararam.
+                        </div>
+                      </button>
+                    </div>
+                  ) : micError ? (
                     // Microfone falhou: a conexao esta OK, mas nao da para falar.
                     // Antes a UI dizia "Ouvindo... fale com o Charon" aqui — mentia.
                     <div style={{maxWidth: 420, textAlign: 'left'}}>
@@ -1619,17 +1678,25 @@ const handleSaveIdentity = async () => {
                     marginBottom: 10,
                     padding: '8px 10px',
                     borderRadius: 6,
-                    background: t.speaker === 'user' ? 'rgba(180,120,255,0.08)' : 'rgba(0,200,0,0.08)',
-                    borderLeft: `3px solid ${t.speaker === 'user' ? '#b478ff' : '#0c0'}`,
+                    background: t.speaker === 'user' ? 'rgba(180,120,255,0.08)'
+                      : t.speaker === 'sistema' ? 'rgba(255,255,255,0.03)'
+                      : 'rgba(0,200,0,0.08)',
+                    borderLeft: `3px solid ${t.speaker === 'user' ? '#b478ff'
+                      : t.speaker === 'sistema' ? '#444'
+                      : '#0c0'}`,
                   }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                      <span style={{ fontSize: 12 }}>{t.speaker === 'user' ? '👤' : '⚡'}</span>
-                      <span style={{ fontSize: 11, fontWeight: 600, color: t.speaker === 'user' ? '#b478ff' : '#0c0' }}>
-                        {t.speaker === 'user' ? 'Voce' : 'Charon'}
+                      {/* Nota de sistema (ex.: "Interrompido — ouvindo voce").
+                          Vem para o painel direito, discreta, para o usuario
+                          entender por que o Charon parou de falar — sem poluir o
+                          painel central, que e para a entrega organizada. */}
+                      <span style={{ fontSize: 12 }}>{t.speaker === 'user' ? '👤' : t.speaker === 'sistema' ? 'ℹ️' : '⚡'}</span>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: t.speaker === 'user' ? '#b478ff' : t.speaker === 'sistema' ? '#777' : '#0c0' }}>
+                        {t.speaker === 'user' ? 'Voce' : t.speaker === 'sistema' ? 'Sistema' : 'Charon'}
                       </span>
                       <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>{t.time}</span>
                     </div>
-                    <div style={{ color: '#ccc', fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>{renderMarkdown(t.text)}</div>
+                    <div style={{ color: t.speaker === 'sistema' ? '#888' : '#ccc', fontSize: t.speaker === 'sistema' ? 11 : 12, fontStyle: t.speaker === 'sistema' ? 'italic' : 'normal', lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>{renderMarkdown(t.text)}</div>
                   </div>
                 ))
               )}

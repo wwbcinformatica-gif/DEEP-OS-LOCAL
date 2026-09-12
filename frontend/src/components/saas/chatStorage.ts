@@ -137,10 +137,39 @@ export function saveConversations(convs: Conversation[]): void {
   tenantSet(CONVERSATIONS_KEY, JSON.stringify(convs));
 }
 
-export function createConversation(firstMessage?: string, workspace?: string): Conversation {
+function nomeUnico(base: string, existentes: Conversation[]): string {
+  const limpo = (base || '').trim() || 'Nova conversa';
+  const usados = new Set(existentes.map(c => c.name));
+  if (!usados.has(limpo)) return limpo;
+  // Ja existe uma sessao com esse nome: numera. Numerar (em vez de repetir o
+  // mesmo nome) mantem a arvore utilizavel — tres "Charon" na lista seriam
+  // indistinguiveis.
+  let n = 2;
+  while (usados.has(`${limpo} ${n}`)) n++;
+  return `${limpo} ${n}`;
+}
+
+/**
+ * Cria uma conversa/sessao.
+ *
+ * @param firstMessage texto da primeira mensagem (vira o nome automaticamente)
+ * @param workspace    raiz a que pertence
+ * @param nomePadrao   nome quando ainda NAO ha mensagem — usado para dar a
+ *                     sessao o nome do assistente (Configuracoes > Identidade >
+ *                     NOME DO ASSISTENTE). Pedido do usuario: "se podesse
+ *                     colocar a sessao com nome da voz do assistente que foi
+ *                     selecionada seria bom".
+ */
+export function createConversation(
+  firstMessage?: string,
+  workspace?: string,
+  nomePadrao?: string,
+): Conversation {
+  const existentes = getConversations();
+  const base = firstMessage ? autoName(firstMessage) : (nomePadrao || 'Nova conversa');
   const conv: Conversation = {
     id: generateId(),
-    name: firstMessage ? autoName(firstMessage) : 'Nova conversa',
+    name: nomeUnico(base, existentes),
     createdAt: Date.now(),
     updatedAt: Date.now(),
     workspace: (workspace || '').trim() || WORKSPACE_PADRAO,
@@ -280,7 +309,7 @@ export function conversationToMarkdown(
     // varios dias de ajuste. Aqui vai exatamente o que ele ve na tela.
     linhas.push('## Transcricao de voz (Charon) — painel direito', '');
     for (const t of transcricoes) {
-      const quem = t.speaker === 'user' ? 'Voce' : 'Charon';
+      const quem = t.speaker === 'user' ? 'Voce' : t.speaker === 'sistema' ? 'Sistema' : 'Charon';
       linhas.push(`**${quem}** (${t.time})`, '', t.text, '');
     }
   }

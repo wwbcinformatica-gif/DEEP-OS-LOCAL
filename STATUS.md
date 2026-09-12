@@ -1,15 +1,91 @@
 # DEEP-OS — Status do Projeto
 
-**Ultima atualizacao:** 2026-09-12 (Sessao 49) � ver `docs/CONTINUAR.md` para o estado atual e o que falta
+**Ultima atualizacao:** 2026-09-12 (Sessao 50) - ver `docs/CONTINUAR.md` para o estado atual e o que falta
 
-**Commit em producao:** `1c6acbf` | **Backend:** `deepos-backend.service` (active) | **Site:** https://deep-os.tech
+**Commit em producao:** (confira - ver `docs/CONTINUAR.md` secao 1) | **Backend:** `deepos-backend.service` (active) | **Site:** https://deep-os.tech
 
 **Leia primeiro:** [`memory.md`](memory.md) (regras e armadilhas do projeto),
+[`docs/CONTINUAR.md`](docs/CONTINUAR.md) (handoff: estado, pendências e armadilhas),
 [`docs/PROVEDORES.md`](docs/PROVEDORES.md) (provedores comuns e como criar os seus),
 [`docs/MODELOS.md`](docs/MODELOS.md) (por que os modelos davam 404 e como testar),
 [`docs/CHARON-VOZ.md`](docs/CHARON-VOZ.md) (arquitetura da voz — a parte mais
 complexa do sistema) e [`RECUPERAR-VPS.md`](RECUPERAR-VPS.md) (procedimento de
 emergencia do servidor).
+
+---
+
+## Sessao 2026-09-12 (50) — Charon: `<ctrl46>`, escolha de contexto e sessão nomeada
+
+### Resumo
+Três queixas do usuário, todas no Charon (a voz):
+
+1. *"tem hora que charon para de responder, não é sempre, mas às vezes fica
+   assim -> `<ctrl46>` ... e não retorna"*
+2. *"eu escolho do lado direito no workspace novo chat ou clico em algum
+   histórico registrado ... não faz nenhuma das duas até eu escolher"*
+3. *"se pudesse colocar a sessão com o nome da voz do assistente que foi
+   selecionada seria bom"*
+
+Resultado: correções no backend de voz (filtro + recuperação de turno morto),
+mudança de fluxo na tela do Charon (o usuário escolhe o contexto) e sessões
+nomeadas pelo campo **NOME DO ASSISTENTE** (Configurações → Identidade).
+Suíte: **20/20 passando**.
+
+### 1. `<ctrl46>` — o turno que nasce morto
+
+`<ctrl46>` **não é texto do DEEP-OS**. É um *token de controle* interno do Gemini
+(a família `<ctrlN>`) que, nos modelos Live *preview*, às vezes **vaza como
+texto** na `output_transcription` quando a geração degenera. O turno fechava com
+**zero voz e zero texto real** — e, como **não havia erro nenhum**, nada disparava
+a reconexão automática: o Charon ficava **mudo para sempre**.
+
+Correção em `backend/routes/voice_ws.py`:
+
+- `_TOKEN_CONTROLE` + `_limpar_tokens_controle()` — o token é filtrado e não
+  chega mais ao painel;
+- contadores de saúde **por turno** + `_iniciar_turno()`;
+- `_fechar_turno()` — turno vazio é falha: na **1ª** pede a resposta de novo
+  (`_recuperar_turno('pedir_de_novo')`), na **2ª seguida** reabre a sessão
+  (`_recuperar_turno('reconectar')`, com `restaurar_contexto=True`);
+- **barge-in não conta como falha** (turno interrompido fecha sem áudio de
+  propósito).
+
+**Bug sério achado de quebra:** `_reconnect()` montava a instrução do sistema
+**só com a voz** — sem fuso, idioma e **sem as instruções personalizadas** (de
+onde vem o nome do usuário). Ou seja: **toda reconexão fazia o Charon esquecer
+quem era o usuário**.
+
+### 2. O Charon não inicia sozinho — o usuário escolhe o contexto
+
+Antes, ao abrir a página o Charon **ligava sozinho** (timer de 1 s + listener do
+primeiro gesto) e cumprimentava. Agora:
+
+- **auto-start removido**;
+- `modoInicio: 'escolher' | 'novo' | 'historico'` — abre em **`'escolher'`** e
+  **nada** acontece até o usuário decidir;
+- **`+ Novo chat`** (explícito, no topo da árvore): sessão nova, conecta
+  sozinho, sem histórico → o backend **cumprimenta**;
+- **clique numa sessão da árvore**: carrega `getTranscripts(convId)`, manda como
+  `history` e **reconecta** → o backend reenvia o contexto e **pergunta de onde
+  continuar** (o gatilho de retomada foi reescrito para terminar com pergunta);
+- `entrarNaConversa()` centraliza "trocar contexto = reconectar".
+
+### 3. Sessão com o nome do assistente
+
+`createConversation()` ganhou o 3º parâmetro opcional (`nomePadrao`) e
+`nomeUnico()` numera quando repete ("Charon", "Charon 2"). O nome vem de
+**Configurações → Identidade → NOME DO ASSISTENTE**. Vale para o Charon **e**
+para o Jarvis (cada um lê a identidade do tenant).
+
+### 4. Correções menores
+
+- `CharonPage.tsx` tinha um `interface TranscriptEntry` **local** sombreando o
+  tipo do `chatStorage` → erro `TS2440`; removido (**um lugar só**).
+- O aviso "Interrompido (voce falou)" saiu do **painel central** e foi para o
+  painel **direito** (transcrição), como o usuário pediu — o central é para a
+  entrega organizada.
+- `STATUS.md` tinha **um byte inválido** (0x97) que impedia até de abrir o
+  arquivo; corrigido (backup em `backup-docs/`).
 
 ---
 

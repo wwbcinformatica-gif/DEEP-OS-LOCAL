@@ -31,6 +31,7 @@ from pathlib import Path
 RAIZ = Path(__file__).resolve().parent.parent
 STORAGE = RAIZ / "frontend" / "src" / "components" / "saas" / "chatStorage.ts"
 JARVIS = RAIZ / "frontend" / "src" / "components" / "saas" / "JarvisPage.tsx"
+CHARON = RAIZ / "frontend" / "src" / "components" / "saas" / "CharonPage.tsx"
 
 falhas = []
 
@@ -43,6 +44,7 @@ def check(cond, ok, bad):
 
 storage = STORAGE.read_text(encoding="utf-8")
 jarvis = JARVIS.read_text(encoding="utf-8")
+charon = CHARON.read_text(encoding="utf-8")
 
 print("=== 1. As mensagens do chat agora sao persistidas ===")
 check("export function getMessages" in storage,
@@ -181,7 +183,8 @@ check("fontSize: 10, color: ws === workspaceAtivo" in jarvis,
       "a raiz tem estilo discreto (fonte pequena, cinza quando inativa)",
       "a raiz nao segue o padrao discreto")
 # Conversa nova precisa herdar a raiz ativa
-check("createConversation(undefined, workspaceAtivo)" in jarvis,
+# O 3o argumento (nome do assistente) e opcional; o que importa aqui e a raiz.
+check("createConversation(undefined, workspaceAtivo" in jarvis,
       "conversa nova nasce no workspace ativo",
       "conversa nova cai sempre na raiz padrao")
 
@@ -206,7 +209,7 @@ check("''" in inicial or '""' in inicial,
 m_send = re.search(r"const handleSendMessageDirect = async \(text: string\) => \{(.*?)\n  \};", jarvis, re.S)
 corpo_send = m_send.group(1) if m_send else ""
 check(bool(corpo_send), "isolei o corpo do envio de mensagem", "nao achei handleSendMessageDirect")
-check("if (!activeConvId)" in corpo_send and "createConversation(text.trim(), workspaceAtivo)" in corpo_send,
+check("if (!activeConvId)" in corpo_send and "createConversation(text.trim(), workspaceAtivo" in corpo_send,
       "a primeira mensagem CRIA a conversa (no workspace ativo)",
       "sem isto, abrir limpo significaria nunca salvar nada")
 
@@ -437,6 +440,36 @@ check("setTranscripts(prev => [...prev, { speaker: 'charon', text, time: now() }
 check("NAO JUNTAR OS PEDACOS" in charon and "NAO JUNTAR OS PEDACOS" in storage,
       "ha aviso nos DOIS arquivos para nao juntar de novo",
       "falta o aviso — alguem pode 'melhorar' isso outra vez")
+
+print()
+print("=== 12. Recado de status vai para o painel DIREITO, nao o central ===")
+# Pedido: "estes retornos -> SYSTEM - 19:33:08 Interrompido (voce falou) -
+# ouvindo voce; nao seria necessario entregar no painel central. se quiser pode
+# deixar esse retorno no painel direito".
+#
+# Segue a divisao que o usuario definiu: o painel central e para a ENTREGA
+# ORGANIZADA (ferramentas, buscas, resultados). Status ali e ruido.
+check("addActivity(`Interrompido" not in charon,
+      "a interrupcao NAO vai mais para o log de atividades (painel central)",
+      "a interrupcao ainda aparece no painel central")
+check("speaker: 'sistema', text: `Interrompido" in charon,
+      "a interrupcao vai para a transcricao (painel direito)",
+      "a interrupcao nao foi para o painel direito")
+check("t.speaker === 'sistema'" in charon,
+      "a renderizacao do painel direito trata o falante 'sistema'",
+      "sem tratamento, a nota apareceria como se fosse fala do Charon")
+check("'Sistema'" in charon,
+      "a nota de sistema aparece rotulada como 'Sistema' (nao 'Charon')",
+      "a nota de sistema nao tem rotulo proprio no painel direito")
+check("t.speaker === 'system' ? 'Sistema'" in storage or "t.speaker === 'sistema' ? 'Sistema'" in storage,
+      "o export rotula a nota de sistema corretamente",
+      "no arquivo exportado a nota apareceria como fala do Charon")
+
+# Os outros avisos de 'system' continuam no central — nao foram movidos sem
+# pedido (o usuario apontou especificamente a interrupcao).
+check("addActivity('Microfone pausado pelo navegador" in charon,
+      "os avisos de microfone continuam no painel central (nao mexidos)",
+      "os avisos de microfone foram movidos sem pedido")
 
 print()
 print("=" * 70)

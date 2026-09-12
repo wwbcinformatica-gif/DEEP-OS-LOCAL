@@ -151,7 +151,6 @@ check("SEM se reapresentar" in corpo_ret,
 check("SEM resumir" in corpo_ret,
       "a retomada proibe resumir o historico inteiro",
       "sem isso o modelo faz um resumo longo — ruim em voz")
-
 print()
 print("=== 5. Frontend: a regra das duas situacoes ===")
 check("restaurarHistorico" in texto_front,
@@ -180,10 +179,17 @@ corpo_novo = m_novo.group(1) if m_novo else ""
 check("setRestaurarHistorico(false)" in corpo_novo,
       "criar conversa nova volta a ser sessao nova",
       "depois de restaurar, a conversa nova continuaria restaurando contexto")
-# Trocar de conversa com a sessao aberta precisa RECONECTAR
-check("disconnectVoice()" in corpo_sw and "connectVoiceRef.current()" in corpo_sw,
+# Trocar de conversa com a sessao aberta precisa RECONECTAR.
+# O corpo que faz isso agora e `entrarNaConversa` (o `switchConversation` chama
+# ele) — a reconexao saiu de dentro do switch para ser compartilhada com o
+# "+ Novo chat", que tambem precisa ligar/reconectar. O teste olha o arquivo
+# inteiro para nao ficar frágil a esse tipo de mudanca de lugar.
+check("disconnectVoice()" in texto_front and "connectVoiceRef.current()" in texto_front,
       "trocar de conversa com a sessao aberta reconecta (o Gemini nao 'rebobina')",
       "so trocar o estado da tela nao muda nada no Gemini — o contexto continuaria o antigo")
+check("entrarNaConversa" in corpo_sw,
+      "o clique na conversa passa pelo caminho que reconecta",
+      "o switch nao chama a reconexao — o contexto antigo continuaria")
 # Indicador visual
 check("lembra da conversa" in texto_front,
       "ha indicador visual de que o Charon esta lembrando da conversa",
@@ -198,6 +204,83 @@ check("self._interrupted = False" not in codigo_sa,
       "send_audio NAO reseta _interrupted",
       "send_audio ainda reseta _interrupted — como roda a cada chunk do microfone, "
       "desfaz o barge-in logo em seguida")
+
+
+print()
+print("=== 7. As DUAS escolhas de contexto ao abrir o Charon ===")
+# PEDIDO DO USUARIO (literal):
+#   "exemplo 1 nova conversa -> charon ja comeca automaticamente
+#    2 se eu escolher um dos historicos ele ja comeca sabendo de todo o conteudo
+#    daquele historico e ja pergunta de onde quer continua ou alguma pergunta
+#    sobre o historico"
+#
+# E antes disso: "nao faz nenhuma das duas ate eu escolher".
+#
+# Ou seja: ao ABRIR a pagina o Charon nao liga (nem cria conversa, nem pede
+# microfone, nem cumprimenta). Ele espera a escolha — e a escolha, seja qual for,
+# conecta sozinha.
+
+# 7a. Sem auto-start: nada de timer nem de listeners de primeiro gesto.
+check("tentarAutoStart" not in texto_front,
+      "nao existe mais auto-start do Charon ao abrir a pagina",
+      "o Charon ainda liga sozinho ao abrir — contraria 'nao faz nenhuma das duas ate eu escolher'")
+check("setTimeout(() => tentarAutoStart" not in texto_front,
+      "nao ha timer de auto-start",
+      "o timer ligaria o Charon sozinho depois de 1s")
+
+# 7b. Ha o estado de escolha, e ele comeca em 'escolher'.
+check("modoInicio" in texto_front and "'escolher' | 'novo' | 'historico'" in texto_front,
+      "existe o estado de escolha do contexto (escolher | novo | historico)",
+      "sem esse estado nao ha como representar 'ainda nao escolhi'")
+check("useState<'escolher' | 'novo' | 'historico'>('escolher')" in texto_front,
+      "a pagina abre no estado 'escolher' (Charon parado)",
+      "a pagina abriria ja num modo, ligando o Charon sem escolha")
+
+# 7c. A tela de escolha mostra as DUAS opcoes.
+check("Como voce quer comecar?" in texto_front,
+      "ha uma tela perguntando como comecar",
+      "o usuario nao ve a escolha — foi o pedido dele (igual ao painel do DSH)")
+check("+ Novo chat" in texto_front,
+      "'+ Novo chat' aparece como opcao explicita",
+      "a opcao de conversa nova continua escondida num '+' pequeno")
+check("Continuar uma conversa" in texto_front,
+      "a opcao de continuar do historico aparece explicitamente",
+      "nao esta claro que da para continuar uma conversa salva")
+
+# 7d. ESCOLHA 1 (nova conversa): liga sozinho e cumprimenta.
+m_nc = re.search(r"const newConversation = \(\) => \{(.*?)\n  \};", texto_front, re.S)
+corpo_nc = m_nc.group(1) if m_nc else ""
+check("connectVoiceRef.current()" in texto_front,
+      "a escolha conecta o Charon (nao precisa de um terceiro clique)",
+      "escolher nao ligaria o Charon — o usuario teria de clicar de novo")
+check("modoInicioRef.current = 'novo'" in corpo_nc,
+      "nova conversa marca o modo 'novo'",
+      "nova conversa nao marcaria o modo, e o historico poderia ser restaurado")
+check("restaurarHistoricoRef.current = false" in corpo_nc,
+      "nova conversa NAO manda historico (o backend cumprimenta)",
+      "nova conversa mandaria historico — nao seria 'contexto novo'")
+
+# 7e. ESCOLHA 2 (historico): manda o historico E pede a pergunta de continuacao.
+check("modoInicioRef.current = 'historico'" in texto_front,
+      "escolher uma conversa salva marca o modo 'historico'",
+      "o modo nao seria registrado ao escolher do historico")
+check("getTranscripts(convId)" in texto_front or "getTranscripts(activeConvId)" in texto_front,
+      "escolher do historico carrega os transcripts daquela conversa",
+      "o historico salvo nao seria carregado antes de conectar")
+
+# O backend precisa PERGUNTAR de onde continuar (pedido explicito do usuario).
+m_ret = re.search(r"async def _pedir_retomada\(self.*?(?=\n    async def )", texto_back, re.S)
+corpo_ret = m_ret.group(0) if m_ret else ""
+check(bool(corpo_ret), "isolei _pedir_retomada", "nao achei _pedir_retomada")
+check("PERGUNTA" in corpo_ret.upper(),
+      "a retomada manda o Charon PERGUNTAR de onde continuar",
+      "a retomada so diz que lembra, sem perguntar — era o pedido do usuario")
+check("de onde" in corpo_ret.lower(),
+      "o gatilho cita explicitamente 'de onde' continuar",
+      "o gatilho nao orienta a pergunta de continuacao")
+check("PROIBIDO" in corpo_ret,
+      "a retomada continua proibindo se reapresentar/resumir tudo",
+      "sem a proibicao o modelo volta a discursar no meio da conversa")
 
 
 def funcao_que_contem(linhas: list, numero_linha: int) -> str:
