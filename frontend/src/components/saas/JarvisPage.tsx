@@ -13,12 +13,20 @@ interface ToolCall {
   status: 'running' | 'done' | 'error';
 }
 
+interface ProcessEntry {
+  id: string;
+  type: 'thinking' | 'tool_start' | 'tool_end' | 'tool_error' | 'info';
+  label: string;
+  detail?: string;
+  timestamp: Date;
+  status?: 'running' | 'done' | 'error';
+}
+
 interface Message {
   id: string;
   role: 'user' | 'jarvis';
   content: string;
   timestamp: Date;
-  tools?: ToolCall[];
   isStreaming?: boolean;
 }
 
@@ -84,6 +92,7 @@ const JarvisPage: React.FC = () => {
       timestamp: new Date(),
     },
   ]);
+  const [processLog, setProcessLog] = useState<ProcessEntry[]>([]);
   const [input, setInput] = useState('');
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -110,7 +119,7 @@ const JarvisPage: React.FC = () => {
   const rightPanelWidthRef = useRef(280);
   const [rightPanelWidth, setRightPanelWidth] = useState(280);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const rightListRef = useRef<HTMLDivElement>(null);
+  const processListRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
 
@@ -162,6 +171,10 @@ const JarvisPage: React.FC = () => {
   }, [messages]);
 
   useEffect(() => {
+    processListRef.current?.scrollTo({ top: processListRef.current.scrollHeight, behavior: 'smooth' });
+  }, [processLog]);
+
+  useEffect(() => {
     if (selectedProvider === 'ollama') {
       setLoadingModels(true);
       fetch('/ollama/models').then(r => r.ok ? r.json() : { models: [] }).then(data => {
@@ -202,6 +215,23 @@ const JarvisPage: React.FC = () => {
     }
   }, []);
 
+  const addProcess = (type: ProcessEntry['type'], label: string, detail?: string, status?: ProcessEntry['status']) => {
+    setProcessLog(prev => [...prev, {
+      id: String(Date.now()) + Math.random().toString(36).slice(2, 6),
+      type, label, detail, timestamp: new Date(), status,
+    }]);
+  };
+
+  const updateLastProcess = (patch: Partial<ProcessEntry>) => {
+    setProcessLog(prev => {
+      const updated = [...prev];
+      if (updated.length > 0) {
+        updated[updated.length - 1] = { ...updated[updated.length - 1], ...patch };
+      }
+      return updated;
+    });
+  };
+
   const toggleGpu = async (provider: string) => {
     const newVal = !gpuMode[provider];
     setGpuMode(prev => ({ ...prev, [provider]: newVal }));
@@ -220,17 +250,14 @@ const JarvisPage: React.FC = () => {
       alert('Seu navegador nao suporta reconhecimento de voz. Use Chrome.');
       return;
     }
-
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
     const recognition = new SpeechRecognition();
     recognition.lang = 'pt-BR';
     recognition.interimResults = true;
     recognition.continuous = false;
-
     recognition.onstart = () => setIsListening(true);
     recognition.onend = () => setIsListening(false);
     recognition.onerror = () => setIsListening(false);
-
     recognition.onresult = (event: any) => {
       let transcript = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -241,25 +268,22 @@ const JarvisPage: React.FC = () => {
         handleSendMessageDirect(transcript);
       }
     };
-
     recognitionRef.current = recognition;
     recognition.start();
   };
 
   const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop();
-    }
+    if (recognitionRef.current) recognitionRef.current.stop();
   };
 
   const speak = async (text: string) => {
     const voiceOpt = VOICE_OPTIONS.find(v => v.key === selectedVoice) || VOICE_OPTIONS[0];
     const clean = text.replace(/\*\*/g, '').replace(/[#>*_`]/g, '').trim();
     if (!clean) return;
-
     if (voiceOpt.type === 'edge') {
       try {
         synthRef.current?.cancel();
+        addProcess('info', 'Gerando audio com Edge TTS...');
         const res = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -272,25 +296,17 @@ const JarvisPage: React.FC = () => {
         audio.volume = 1.0;
         audioRef.current = audio;
         setIsSpeaking(true);
-        audio.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(audio.src); };
-        audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(audio.src); };
-        await audio.play().catch((e) => {
-          console.warn('Audio play bloqueado, tentando browser TTS:', e);
-          speakBrowser(clean, voiceOpt);
-        });
+        audio.onended = () => { setIsSpeaking(false); URL.revokeObjectURL(audio.src); updateLastProcess({ status: 'done' }); };
+        audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(audio.src); updateLastProcess({ status: 'error' }); };
+        await audio.play().catch(() => speakBrowser(clean, voiceOpt));
         return;
-      } catch (e) {
-        console.warn('Edge TTS falhou, usando browser:', e);
-      }
+      } catch (e) { console.warn('Edge TTS falhou:', e); }
     }
-
     speakBrowser(clean, voiceOpt);
   };
 
   const speakBrowser = (text: string, voiceOpt: any) => {
-    if (!synthRef.current) {
-      synthRef.current = window.speechSynthesis;
-    }
+    if (!synthRef.current) synthRef.current = window.speechSynthesis;
     if (!synthRef.current) return;
     synthRef.current.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
@@ -311,14 +327,8 @@ const JarvisPage: React.FC = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const stopSpeaking = () => {
-    if (synthRef.current) {
-      synthRef.current.cancel();
-    }
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
+    if (synthRef.current) synthRef.current.cancel();
+    if (audioRef.current) { audioRef.current.pause(); audioRef.current.currentTime = 0; audioRef.current = null; }
     setIsSpeaking(false);
   };
 
@@ -331,10 +341,11 @@ const JarvisPage: React.FC = () => {
       content: text,
       timestamp: new Date(),
     };
-
     setMessages(prev => [...prev, userMessage]);
     setInput('');
     setIsTyping(true);
+
+    addProcess('thinking', 'Analisando pergunta...', `"${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`);
 
     const jarvisMsg: Message = {
       id: String(Date.now() + 1),
@@ -342,14 +353,14 @@ const JarvisPage: React.FC = () => {
       content: '',
       timestamp: new Date(),
       isStreaming: true,
-      tools: [],
     };
     setMessages(prev => [...prev, jarvisMsg]);
 
     try {
       const token = tenantGet('saas_token') || localStorage.getItem('saas_token');
       const activeKey = selectedProvider === 'gemini' ? apiKey : (apiKeys[selectedProvider] || tenantGet(`${selectedProvider}_api_key`) || '');
-      console.log('[Jarvis] Provider:', selectedProvider, 'Key:', activeKey ? '***' : 'VAZIA');
+      addProcess('info', `Conectando com ${selectedProvider}...`, `Modelo: ${selectedModel}`);
+
       const resp = await fetch('/chat/stream', {
         method: 'POST',
         headers: {
@@ -367,14 +378,15 @@ const JarvisPage: React.FC = () => {
         }),
       });
 
-      if (!resp.ok) {
-        throw new Error(`Erro ${resp.status}: ${resp.statusText}`);
-      }
+      if (!resp.ok) throw new Error(`Erro ${resp.status}: ${resp.statusText}`);
+
+      addProcess('thinking', 'Modelo processando...', 'Aguardando resposta');
 
       const reader = resp.body?.getReader();
       const decoder = new TextDecoder();
       let fullAnswer = '';
       let buffer = '';
+      let tokenCount = 0;
 
       if (reader) {
         while (true) {
@@ -392,6 +404,7 @@ const JarvisPage: React.FC = () => {
 
               if (event.type === 'token') {
                 fullAnswer += event.content || '';
+                tokenCount++;
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
@@ -400,41 +413,20 @@ const JarvisPage: React.FC = () => {
                   }
                   return updated;
                 });
+                if (tokenCount === 1) {
+                  updateLastProcess({ label: 'Gerando resposta...', detail: 'Tokens recebidos' });
+                }
               } else if (event.type === 'tool_start') {
-                const tools = [...(jarvisMsg.tools || [])];
-                tools.push({
-                  name: event.tool_name || 'unknown',
-                  params: event.params || {},
-                  status: 'running',
-                });
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const idx = updated.findIndex(m => m.id === jarvisMsg.id);
-                  if (idx >= 0) updated[idx] = { ...updated[idx], tools };
-                  return updated;
-                });
+                addProcess('tool_start', `Ferramenta: ${event.tool_name || 'desconhecida'}`, JSON.stringify(event.params || {}).slice(0, 120), 'running');
               } else if (event.type === 'tool_end') {
-                setMessages(prev => {
-                  const updated = [...prev];
-                  const idx = updated.findIndex(m => m.id === jarvisMsg.id);
-                  if (idx >= 0) {
-                    const tools = [...(updated[idx].tools || [])];
-                    const lastTool = tools.length - 1;
-                    if (lastTool >= 0) {
-                      tools[lastTool] = { ...tools[lastTool], result: event.result, status: 'done' };
-                    }
-                    updated[idx] = { ...updated[idx], tools };
-                  }
-                  return updated;
-                });
+                addProcess('tool_end', `Ferramenta concluida`, event.result ? String(event.result).slice(0, 120) : 'OK', 'done');
               } else if (event.type === 'error') {
+                addProcess('tool_error', `Erro: ${event.message}`, undefined, 'error');
                 fullAnswer += `\n\nErro: ${event.message}`;
                 setMessages(prev => {
                   const updated = [...prev];
                   const last = updated[updated.length - 1];
-                  if (last.id === jarvisMsg.id) {
-                    updated[updated.length - 1] = { ...last, content: fullAnswer };
-                  }
+                  if (last.id === jarvisMsg.id) updated[updated.length - 1] = { ...last, content: fullAnswer };
                   return updated;
                 });
               } else if (event.type === 'done') {
@@ -448,15 +440,17 @@ const JarvisPage: React.FC = () => {
       setMessages(prev => {
         const updated = [...prev];
         const idx = updated.findIndex(m => m.id === jarvisMsg.id);
-        if (idx >= 0) {
-          updated[idx] = { ...updated[idx], content: fullAnswer, isStreaming: false };
-        }
+        if (idx >= 0) updated[idx] = { ...updated[idx], content: fullAnswer, isStreaming: false };
         return updated;
       });
+
+      addProcess('info', 'Resposta concluida', `${tokenCount} tokens, ${fullAnswer.length} caracteres`);
+      updateLastProcess({ status: 'done' });
 
       if (fullAnswer) speak(fullAnswer);
 
     } catch (err: any) {
+      addProcess('tool_error', `Erro: ${err.message}`, undefined, 'error');
       setMessages(prev => {
         const updated = [...prev];
         const idx = updated.findIndex(m => m.id === jarvisMsg.id);
@@ -500,6 +494,7 @@ const JarvisPage: React.FC = () => {
     setConversations(getConversations());
     setActiveConvId(conv.id);
     setTranscripts([]);
+    setProcessLog([]);
     setMessages([{
       id: '1',
       role: 'jarvis',
@@ -515,9 +510,7 @@ const JarvisPage: React.FC = () => {
     deleteConversation(convId);
     const updated = getConversations();
     setConversations(updated);
-    if (activeConvId === convId) {
-      setActiveConvId(updated[0]?.id || '');
-    }
+    if (activeConvId === convId) setActiveConvId(updated[0]?.id || '');
   };
 
   const handleRenameConversation = (convId: string, e: React.MouseEvent) => {
@@ -534,6 +527,20 @@ const JarvisPage: React.FC = () => {
     const d = new Date(ts);
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   };
+
+  const formatProcessTime = (d: Date) => {
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+  };
+
+  const processIcon = (type: ProcessEntry['type'], status?: string) => {
+    if (type === 'thinking') return '\u{1F4AD}';
+    if (type === 'tool_start') return status === 'running' ? '\u23F3' : '\u2699\uFE0F';
+    if (type === 'tool_end') return '\u2705';
+    if (type === 'tool_error') return '\u274C';
+    return '\u2139\uFE0F';
+  };
+
+  const activeToolCount = processLog.filter(p => p.type === 'tool_start' && p.status === 'running').length;
 
   return (
     <div style={s.container}>
@@ -580,47 +587,34 @@ const JarvisPage: React.FC = () => {
               <div style={s.emptyState}>Jarvis pronto. Como posso ajudar?</div>
             ) : messages.map(msg => (
               <div key={msg.id} style={{
-                marginBottom: 10, padding: '8px 10px', borderRadius: 6,
-                background: msg.role === 'user' ? 'rgba(0,217,255,0.08)' : 'rgba(180,120,255,0.08)',
+                marginBottom: 10, padding: '10px 14px', borderRadius: 8,
+                background: msg.role === 'user' ? 'rgba(0,217,255,0.06)' : 'rgba(180,120,255,0.04)',
                 borderLeft: `3px solid ${msg.role === 'user' ? '#00d9ff' : '#b478ff'}`,
               }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: 12 }}>{msg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <span style={{ fontSize: 13 }}>{msg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}</span>
                   <span style={{ fontSize: 11, fontWeight: 600, color: msg.role === 'user' ? '#00d9ff' : '#b478ff' }}>
                     {msg.role === 'user' ? 'Voce' : 'Jarvis'}
                   </span>
-                  <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>
+                  <span style={{ fontSize: 10, color: '#555', marginLeft: 'auto' }}>
                     {msg.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
                   </span>
                 </div>
-                <div style={{ color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
+                <div style={{ color: '#ddd', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 13, lineHeight: 1.7, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
                   {msg.content}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>{'\u258C'}</span>}
                 </div>
-                {msg.tools && msg.tools.length > 0 && (
-                  <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {msg.tools.map((tool, i) => (
-                      <div key={i} style={{ padding: '6px 8px', background: '#111', borderRadius: 4, borderLeft: `2px solid ${tool.status === 'running' ? '#f59e0b' : tool.status === 'done' ? '#10b981' : '#ef4444'}`, fontSize: 11 }}>
-                        <span style={{ color: '#999' }}>{'\uD83D\uDD27'}</span> <span style={{ color: '#ccc', fontWeight: 600 }}>{tool.name}</span>
-                        <span style={{ marginLeft: 8, color: tool.status === 'running' ? '#f59e0b' : tool.status === 'done' ? '#10b981' : '#ef4444', fontSize: 10 }}>
-                          {tool.status === 'running' ? 'Executando...' : tool.status === 'done' ? 'Concluido' : 'Erro'}
-                        </span>
-                        {tool.result && <pre style={{ marginTop: 4, padding: 4, background: '#1a1a2e', borderRadius: 3, fontSize: 10, fontFamily: 'monospace', color: '#999', overflow: 'auto', maxHeight: 80, whiteSpace: 'pre-wrap' }}>{tool.result}</pre>}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
             {isTyping && (
-              <div style={{ marginBottom: 10, padding: '8px 10px', borderRadius: 6, background: 'rgba(0,217,255,0.08)', borderLeft: '3px solid #00d9ff' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 4 }}>
-                  <span style={{ fontSize: 12 }}>{'\uD83E\uDD16'}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>Jarvis</span>
+              <div style={{ marginBottom: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(180,120,255,0.04)', borderLeft: '3px solid #b478ff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: 13 }}>{'\uD83E\uDD16'}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff' }}>Jarvis</span>
                 </div>
-                <div style={{ display: 'flex', gap: 4, padding: '4px 0' }}>
-                  <span style={{ width: 6, height: 6, background: '#666', borderRadius: '50%', animation: 'pulse 1.4s infinite' }} />
-                  <span style={{ width: 6, height: 6, background: '#666', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.2s' }} />
-                  <span style={{ width: 6, height: 6, background: '#666', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.4s' }} />
+                <div style={{ display: 'flex', gap: 6, padding: '6px 0' }}>
+                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite' }} />
+                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.2s' }} />
+                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.4s' }} />
                 </div>
               </div>
             )}
@@ -666,32 +660,43 @@ const JarvisPage: React.FC = () => {
 
         <div style={{ ...s.rightPanel, width: rightPanelWidth }}>
           <div style={s.rightHeader}>
-            <span style={{ fontSize: 11, fontWeight: 600, color: '#00d9ff' }}>{'\uD83E\uDD16'} Jarvis</span>
-            <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>{messages.length} msgs</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff' }}>{'\u2699\uFE0F'} Processos</span>
+            <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>
+              {activeToolCount > 0 ? <span style={{ color: '#f59e0b' }}>{activeToolCount} ativo{activeToolCount > 1 ? 's' : ''}</span> : 'Idle'}
+            </span>
           </div>
-          <div ref={rightListRef} style={s.messagesList}>
-            {transcripts.length === 0 ? (
-              <div style={s.emptyState}>Conversas do Jarvis aparecerao aqui.</div>
-            ) : transcripts.map((t, i) => (
-              <div key={i} style={{
-                marginBottom: 8, padding: '6px 8px', borderRadius: 4,
-                background: t.speaker === 'user' ? 'rgba(0,217,255,0.06)' : 'rgba(180,120,255,0.06)',
-                borderLeft: `2px solid ${t.speaker === 'user' ? '#00d9ff' : '#b478ff'}`,
+          <div ref={processListRef} style={s.processList}>
+            {processLog.length === 0 ? (
+              <div style={s.emptyState}>Nenhum processo ainda. Envie uma mensagem para ver a atividade do modelo aqui.</div>
+            ) : processLog.map(entry => (
+              <div key={entry.id} style={{
+                ...s.processItem,
+                borderLeftColor: entry.type === 'tool_error' ? '#ef4444' : entry.type === 'tool_end' ? '#10b981' : entry.type === 'tool_start' ? '#f59e0b' : entry.type === 'thinking' ? '#b478ff' : '#444',
               }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 2 }}>
-                  <span style={{ fontSize: 10, fontWeight: 600, color: t.speaker === 'user' ? '#00d9ff' : '#b478ff' }}>
-                    {t.speaker === 'user' ? 'Voce' : 'Jarvis'}
+                  <span style={{ fontSize: 10 }}>{processIcon(entry.type, entry.status)}</span>
+                  <span style={{ fontSize: 10, fontWeight: 600, color: entry.type === 'tool_error' ? '#ef4444' : entry.type === 'tool_end' ? '#10b981' : entry.type === 'tool_start' ? '#f59e0b' : entry.type === 'thinking' ? '#b478ff' : '#888' }}>
+                    {entry.label}
                   </span>
-                  <span style={{ fontSize: 9, color: '#666', marginLeft: 'auto' }}>{t.time}</span>
+                  <span style={{ fontSize: 8, color: '#555', marginLeft: 'auto' }}>{formatProcessTime(entry.timestamp)}</span>
                 </div>
-                <div style={{ color: '#999', fontSize: 10, lineHeight: 1.4, fontFamily: "'Cascadia Code', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{t.text}</div>
+                {entry.detail && (
+                  <div style={{ fontSize: 9, color: '#777', lineHeight: 1.3, fontFamily: "'Cascadia Code', monospace", whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {entry.detail}
+                  </div>
+                )}
+                {entry.status === 'running' && (
+                  <div style={{ marginTop: 3, height: 2, background: '#222', borderRadius: 1, overflow: 'hidden' }}>
+                    <div style={{ height: '100%', width: '60%', background: entry.type === 'tool_start' ? '#f59e0b' : '#b478ff', animation: 'processBar 1.5s ease-in-out infinite' }} />
+                  </div>
+                )}
               </div>
             ))}
           </div>
           <div style={s.rightFooter}>
             <span style={{ width: 5, height: 5, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0' }} />
-            <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0' }}>{isTyping ? 'Processando' : 'Pronto'}</span>
-            <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>{selectedProvider}</span>
+            <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0' }}>{isTyping ? 'Ativo' : 'Pronto'}</span>
+            <span style={{ fontSize: 10, color: '#555', marginLeft: 'auto' }}>{processLog.length} eventos</span>
           </div>
         </div>
       </div>
@@ -733,11 +738,7 @@ const JarvisPage: React.FC = () => {
                   <div key={prov} style={s.settingsRow}>
                     <label style={s.settingsLabel}>{prov === 'ollama' ? 'Ollama' : 'llama.cpp'}</label>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
-                      <button onClick={() => toggleGpu(prov)} style={{
-                        ...s.toggleBtn,
-                        background: gpuMode[prov] ? '#10b981' : '#333',
-                        color: gpuMode[prov] ? '#fff' : '#999',
-                      }}>
+                      <button onClick={() => toggleGpu(prov)} style={{ ...s.toggleBtn, background: gpuMode[prov] ? '#10b981' : '#333', color: gpuMode[prov] ? '#fff' : '#999' }}>
                         {gpuMode[prov] ? 'GPU' : 'CPU'}
                       </button>
                       <span style={{ fontSize: 10, color: '#666' }}>{gpuMode[prov] ? 'Aceleracao por GPU' : 'Processamento na CPU'}</span>
@@ -816,15 +817,16 @@ const s: Record<string, React.CSSProperties> = {
   modelSelectWide: { fontSize: 11, padding: '4px 8px', background: '#1a1a2e', border: '1px solid #333', borderRadius: 3, color: '#ccc', minWidth: 140 },
   settingsBtn: { background: 'none', border: '1px solid #333', color: '#ccc', fontSize: 12, cursor: 'pointer', padding: '2px 6px', borderRadius: 3 },
   messagesArea: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 12, minHeight: 0 },
-  emptyState: { color: '#666', textAlign: 'center', marginTop: 40, fontSize: 11 },
+  emptyState: { color: '#555', textAlign: 'center', marginTop: 40, fontSize: 11, fontStyle: 'italic' },
   inputSection: { padding: '0 12px 8px 12px', flexShrink: 0 },
   textarea: { width: '100%', resize: 'none', padding: '8px', borderRadius: 4, border: '1px solid #333', background: '#1a1a2e', color: '#ccc', fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace", fontSize: 11, lineHeight: 1.4, boxSizing: 'border-box', outline: 'none' },
   iconBtn: { width: 28, height: 28, borderRadius: 4, border: '1px solid #333', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 },
   sendBtn: { width: 28, height: 28, borderRadius: 4, border: '1px solid #333', background: '#1a1a2e', color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  rightPanel: { width: 240, display: 'flex', flexDirection: 'column', flexShrink: 0, borderLeft: '1px solid #222', minHeight: 0 },
-  rightHeader: { padding: '8px 12px', borderBottom: '1px solid #222', flexShrink: 0 },
-  messagesList: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 10, minHeight: 0 },
-  rightFooter: { padding: '6px 12px', borderTop: '1px solid #222', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
+  rightPanel: { width: 280, display: 'flex', flexDirection: 'column', flexShrink: 0, borderLeft: '1px solid #222', minHeight: 0, background: '#08081a' },
+  rightHeader: { padding: '8px 12px', borderBottom: '1px solid #1a1a2e', flexShrink: 0, display: 'flex', alignItems: 'center' },
+  processList: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 8, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 4 },
+  processItem: { padding: '6px 8px', borderRadius: 4, background: 'rgba(255,255,255,0.02)', borderLeft: '2px solid #444', fontSize: 10 },
+  rightFooter: { padding: '6px 12px', borderTop: '1px solid #1a1a2e', display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 },
   modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' },
   modalContent: { background: '#0d0d1a', border: '1px solid #333', borderRadius: 12, width: '90%', maxWidth: 560, maxHeight: '85vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' },
   modalHeader: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 16px', borderBottom: '1px solid #222', flexShrink: 0 },
