@@ -1159,6 +1159,17 @@ async def handle_task_stream(msg: Message) -> AsyncGenerator[dict, None]:
                         file_name = os.path.basename(file_path)
                         return await execute_tool("media_play", {"name": file_name, "path": file_path, "isVideo": any(v in cmd_lower for v in ('.mp4', '.avi', '.mkv', '.mov'))})
 
+            # Intercepta browser_control(go_to) com URL de homepage e converte para web_search
+            if tool_name == "browser_control" and params.get("action") == "go_to":
+                url = (params.get("url") or "").strip().rstrip("/")
+                # Detecta se e so o dominio (homepage) sem caminho especifico
+                if url and "/" not in url.split("//")[-1] and "?" not in url and "#" not in url:
+                    # Converte para web_search usando o dominio como contexto
+                    from urllib.parse import urlparse
+                    parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+                    domain = parsed.netloc.replace("www.", "")
+                    return await execute_tool("web_search", {"query": f"site:{domain}"})
+
             return await execute_tool(tool_name, params)
 
         def on_tool_start_fn(tool_name: str, params: dict):

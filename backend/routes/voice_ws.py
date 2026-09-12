@@ -51,20 +51,7 @@ def _get_gemini_key() -> str:
     try:
         cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
         if cfg_path.exists():
-            k = json.loads(cfg_path.read_text(encoding="utf-8")).get("gemini_api_key", "")
-            if k:
-                return k
-    except Exception:
-        pass
-    try:
-        env_path = Path(__file__).resolve().parent.parent / ".env"
-        if env_path.exists():
-            for line in env_path.read_text(encoding="utf-8").splitlines():
-                if line.startswith("GEMINI_API_KEY=") and not line.startswith("#"):
-                    v = line.split("=", 1)[1].strip()
-                    if v:
-                        os.environ["GEMINI_API_KEY"] = v
-                        return v
+            return json.loads(cfg_path.read_text(encoding="utf-8")).get("gemini_api_key", "")
     except Exception:
         pass
     return ""
@@ -1254,8 +1241,21 @@ class VoiceSession:
                 result = r or "Done."
 
             elif name == "browser_control":
-                r = await loop.run_in_executor(None, lambda: browser_control(parameters=args, player=None))
-                result = r or "Done."
+                # Intercepta go_to com URL de homepage e converte para web_search
+                if args.get("action") == "go_to":
+                    url = (args.get("url") or "").strip().rstrip("/")
+                    if url and "/" not in url.split("//")[-1] and "?" not in url and "#" not in url:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(url if url.startswith("http") else f"https://{url}")
+                        domain = parsed.netloc.replace("www.", "")
+                        r = await loop.run_in_executor(None, lambda: web_search_action({"query": f"site:{domain}"}))
+                        result = r or "Done."
+                    else:
+                        r = await loop.run_in_executor(None, lambda: browser_control(parameters=args, player=None))
+                        result = r or "Done."
+                else:
+                    r = await loop.run_in_executor(None, lambda: browser_control(parameters=args, player=None))
+                    result = r or "Done."
 
             elif name == "file_controller":
                 r = await loop.run_in_executor(None, lambda: file_controller(parameters=args, player=None))
