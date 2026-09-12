@@ -346,15 +346,35 @@ async def get_api_key():
 @router.put("/api-key")
 async def update_api_key(config: ApiKeyConfig):
     try:
-        import json
+        import json, os
         from pathlib import Path
         cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+        env_path = Path(__file__).resolve().parent.parent / ".env"
         if cfg_path.exists():
             data = json.loads(cfg_path.read_text(encoding="utf-8"))
         else:
             data = {}
         data["gemini_api_key"] = config.gemini_api_key
         cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+
+        # Write to .env AND update os.environ
+        env_lines = []
+        if env_path.exists():
+            env_lines = env_path.read_text(encoding="utf-8").splitlines()
+        found = False
+        new_lines = []
+        for line in env_lines:
+            stripped = line.strip()
+            if stripped.startswith("GEMINI_API_KEY="):
+                new_lines.append(f"GEMINI_API_KEY={config.gemini_api_key}")
+                found = True
+            else:
+                new_lines.append(line)
+        if not found and config.gemini_api_key:
+            new_lines.append(f"GEMINI_API_KEY={config.gemini_api_key}")
+        env_path.write_text('\n'.join(new_lines) + '\n', encoding="utf-8")
+        os.environ["GEMINI_API_KEY"] = config.gemini_api_key
+
         return {"status": "success", "message": "Chave API salva no servidor"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar chave: {e}")
@@ -362,9 +382,10 @@ async def update_api_key(config: ApiKeyConfig):
 @router.put("/api-keys")
 async def update_api_keys(request: dict):
     try:
-        import json
+        import json, os
         from pathlib import Path
         cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+        env_path = Path(__file__).resolve().parent.parent / ".env"
         if cfg_path.exists():
             data = json.loads(cfg_path.read_text(encoding="utf-8"))
         else:
@@ -384,8 +405,33 @@ async def update_api_keys(request: dict):
         for env_key, json_key in key_map.items():
             if env_key in request and request[env_key]:
                 data[json_key] = request[env_key]
-                updated.append(json_key)
+                updated.append(env_key)
         cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
+
+        # Write to .env AND update os.environ
+        env_lines = []
+        if env_path.exists():
+            env_lines = env_path.read_text(encoding="utf-8").splitlines()
+        env_keys_written = set()
+        new_lines = []
+        for line in env_lines:
+            stripped = line.strip()
+            if stripped and not stripped.startswith('#') and '=' in stripped:
+                key_name = stripped.split('=', 1)[0].strip()
+                if key_name in key_map and key_name in request and request[key_name]:
+                    new_lines.append(f"{key_name}={request[key_name]}")
+                    env_keys_written.add(key_name)
+                    os.environ[key_name] = request[key_name]
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        for env_key in key_map:
+            if env_key in request and request[env_key] and env_key not in env_keys_written:
+                new_lines.append(f"{env_key}={request[env_key]}")
+                os.environ[env_key] = request[env_key]
+        env_path.write_text('\n'.join(new_lines) + '\n', encoding="utf-8")
+
         return {"status": "success", "updated": updated}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar chaves: {e}")
