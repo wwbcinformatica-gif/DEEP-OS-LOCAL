@@ -277,7 +277,24 @@ const CharonPage: React.FC = () => {
   // Watchdog do microfone: retoma o AudioContext suspenso e readquire a track
   // quando o navegador revoga o acesso no meio da sessao.
   const micWatchdogRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Ultimo instante em que o usuario mexeu no microfone (para o watchdog).
   const lastSendTimeRef = useRef<number>(0);
+
+  // ── Contexto da conversa (regra definida pelo usuario) ───────────────────
+  //
+  //   "sempre for aberto pela primeira vez a sessao deve ser nova, mas quando eu
+  //    entro no novo historico ele deve lembrar de tudo"
+  //
+  // Ou seja: abrir o Charon NAO deve restaurar contexto (sessao nova, com
+  // saudacao). So quando o usuario CLICA numa conversa do historico o contexto
+  // daquela conversa deve ser enviado ao Gemini.
+  //
+  // Sem esta distincao o Charon ou nunca lembrava (como estava) ou lembrava
+  // sempre — inclusive quando o usuario queria comecar do zero.
+  const [restaurarHistorico, setRestaurarHistorico] = useState(false);
+  // Espelho em ref: o callback de conexao precisa do valor atual, e ele e criado
+  // uma vez (state ficaria congelado no valor da primeira renderizacao).
+  const restaurarHistoricoRef = useRef(false);
   const lastAudioHashRef = useRef(0);
   const dupCountRef = useRef(0);
   const audioBufRef = useRef<Int16Array[]>([]);
@@ -668,6 +685,9 @@ const CharonPage: React.FC = () => {
       wsRef.current = ws;
 
       ws.onopen = () => {
+        // Historico SO vai quando o usuario escolheu uma conversa do historico.
+        // Numa abertura normal (sessao nova) vai vazio, e o backend cumprimenta.
+        const historico = historicoParaEnviar();
         ws.send(JSON.stringify({
           type: 'start',
           voice: voiceNameRef.current,
@@ -675,7 +695,11 @@ const CharonPage: React.FC = () => {
           user_name: userNameRef.current,
           timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'America/Sao_Paulo',
           locale: navigator.language || 'pt-BR',
+          history: historico,
         }));
+        if (historico.length) {
+          addActivity(`Restaurando contexto: ${historico.length} falas desta conversa`, 'system');
+        }
       };
 
       ws.onmessage = async (e) => {
@@ -1100,8 +1124,33 @@ const handleSaveIdentity = async () => {
 
   // ─── Conversation management ───────────────────────────────────
   const switchConversation = (convId: string) => {
+    const jaAtiva = convId === activeConvId;
     setActiveConvId(convId);
     setShowConvMenu(false);
+    // O usuario escolheu uma conversa do historico de proposito: a partir daqui
+    // o Charon deve lembrar dela.
+    setRestaurarHistorico(true);
+    restaurarHistoricoRef.current = true;
+
+    // Se a sessao JA esta aberta, so trocar o estado da tela nao muda nada no
+    // Gemini: o estado da conversa fica no servidor DELE e nao pode ser
+    // "rebobinado". A unica forma confiavel de trocar de contexto e RECONECTAR
+    // — assim a sessao nasce ja com o historico certo.
+    //
+    // Reabrir a conversa que ja esta ativa tambem reconecta: e o gesto natural
+    // de "quero o contexto desta aqui".
+    if (startedRef.current) {
+      addActivity(
+        jaAtiva
+          ? 'Recarregando o contexto desta conversa...'
+          : 'Trocando de conversa — recarregando o contexto...',
+        'system',
+      );
+      disconnectVoice();
+      // Pequeno atraso para o servidor fechar a sessao antiga antes de abrir a
+      // nova (o backend tambem derruba sessoes antigas, mas isto evita corrida).
+      setTimeout(() => connectVoiceRef.current(), 600);
+    }
   };
 
   const newConversation = () => {
@@ -1111,6 +1160,15 @@ const handleSaveIdentity = async () => {
     setTranscripts([]);
     setActivityLog([]);
     setShowConvMenu(false);
+    // Conversa nova = sessao nova: nada de restaurar nada.
+    setRestaurarHistorico(false);
+    restaurarHistoricoRef.current = false;
+  };
+
+  /** Transcripts da conversa ativa no formato que o backend espera. */
+  const historicoParaEnviar = (): { speaker: string; text: string }[] => {
+    if (!restaurarHistoricoRef.current || !activeConvId) return [];
+    return getTranscripts(activeConvId).map(t => ({ speaker: t.speaker, text: t.text }));
   };
 
   const handleDeleteConversation = (convId: string, e: React.MouseEvent) => {
@@ -1303,6 +1361,23 @@ const handleSaveIdentity = async () => {
               >
                 {activeConv?.name || 'Nova conversa'}
               </button>
+              {/* Indicador de contexto: deixa claro se o Charon esta num assunto
+                  novo ou se esta lembrando da conversa escolhida. Sem isto o
+                  usuario nao tem como saber se o contexto foi carregado. */}
+              <span
+                title={restaurarHistorico
+                  ? 'Charon esta lembrando desta conversa. Use + para comecar do zero.'
+                  : 'Sessao nova. Abra o historico e clique numa conversa para o Charon lembrar dela.'}
+                style={{
+                  fontSize: 8, padding: '1px 5px', borderRadius: 8, flexShrink: 0,
+                  background: restaurarHistorico ? 'rgba(180,120,255,0.18)' : 'rgba(102,102,102,0.15)',
+                  color: restaurarHistorico ? '#c9a6ff' : '#777',
+                  border: `1px solid ${restaurarHistorico ? 'rgba(180,120,255,0.4)' : '#333'}`,
+                  whiteSpace: 'nowrap' as const,
+                }}
+              >
+                {restaurarHistorico ? '\u21BA lembra da conversa' : 'sessao nova'}
+              </span>
               <span style={{ fontSize: 9, color: '#666' }}>{transcripts.length}</span>
               {showConvMenu && (
                 <div style={{

@@ -1,5 +1,115 @@
 # DEEP-OS - Agent Instructions
 
+## ⛔ REGRA OBRIGATÓRIA Nº 1 — DOIS PROJETOS GÊMEOS
+
+**LEIA ISTO ANTES DE QUALQUER ALTERAÇÃO. VALE PARA TODOS OS MODELOS DE IA.**
+
+Este projeto tem um **GÊMEO** que precisa receber **as mesmas alterações**.
+
+### Cada um tem o SEU REPOSITÓRIO PRÓPRIO no GitHub
+
+| Projeto | Caminho local | Repositório (remoto) | Branch |
+|---------|---------------|----------------------|--------|
+| **DEEP-OS** (principal, vai para a VPS) | `C:\DEEP-OS` | `github.com/wwbcinformatica-gif/DEEP-OS.git` | **`master`** |
+| **DEEP-OS-LOCAL** (roda na máquina) | `C:\DEEP-OS-LOCAL` | `github.com/wwbcinformatica-gif/DEEP-OS-LOCAL.git` | **`main`** |
+
+> ### ⚠️ UM PUSH NÃO ATUALIZA O OUTRO
+>
+> Os repositórios são **independentes**. Fazer `git push` no `DEEP-OS.git`
+> **não** altera nada no `DEEP-OS-LOCAL.git` — e vice-versa.
+>
+> Se você sincronizou os arquivos mas só deu push em um, o outro ficou com o
+> código novo **fora do GitHub**: na próxima vez que alguém clonar ou fizer
+> `git reset`, a alteração desaparece.
+>
+> **São DOIS commits e DOIS pushes, sempre** — cada um no seu remoto e na sua
+> branch (note que as branches têm nomes diferentes: `master` e `main`).
+
+### Eles têm FINALIDADES diferentes (não são só duas cópias)
+
+| | **DEEP-OS** (VPS) | **DEEP-OS-LOCAL** (máquina do usuário) |
+|---|---|---|
+| **Para que serve** | produção, público em `deep-os.tech` | uso diário, na máquina dele |
+| **Ambiente** | Linux **headless** (sem tela), 4 GB RAM | Windows **com desktop**, GPU |
+| **Como roda** | nginx + systemd (`deepos-backend.service`) | `start-saas.bat` (janelas locais) |
+| **Ollama** | instalado mas **sem nenhum modelo** | **25+ modelos** locais |
+| **Ferramentas de GUI** | **não funcionam** (`is_headless()` as remove) | funcionam (abrir app, controlar desktop) |
+| **Deploy** | `scripts/deploy-faf8f93.sh` | não se aplica |
+
+**O que isso implica na prática:**
+
+- **Código é o mesmo; comportamento não.** Uma correção entra nos dois, mas o
+  resultado depende do ambiente. Ex.: ferramentas de GUI funcionam no LOCAL e são
+  filtradas na VPS.
+- **Teste no ambiente certo.** Um bug de proxy/nginx/`Host` (como o `401` do
+  middleware) **só aparece na VPS** — localmente o `Host` é `localhost` e o
+  middleware libera. Já um bug de ferramenta com tela **só aparece no LOCAL**.
+- **Não "conserte" um quebrando o outro.** Não remova o filtro headless para
+  fazer algo funcionar na VPS, nem assuma GPU/RAM na VPS (são 4 GB, sem tela).
+- **Cuidado com caminhos de máquina:** `/root/...` é VPS, `C:\...` é a máquina.
+  Ex.: o único `.gguf` fica em `/root/models/` na VPS, mas **não roda lá** — um
+  7B em Q4 (4,4 GB) não cabe em 4 GB de RAM. Ele serve no LOCAL.
+
+### A REGRA
+
+> **TODA alteração feita em `C:\DEEP-OS` DEVE ser feita também em
+> `C:\DEEP-OS-LOCAL` — e vice-versa.**
+
+Vale para **tudo**: código, correções de bug, listas de modelos, telas, testes,
+documentação e os arquivos `STATUS.md` / `memory.md`.
+
+**Não termine uma tarefa deixando os dois diferentes.** O usuário pediu isso
+explicitamente e a divergência já causou retrabalho.
+
+### COMO SINCRONIZAR (não improvise)
+
+Os dois são **repositórios SEPARADOS**: históricos diferentes (SHAs distintos,
+sem ancestral comum utilizável), remotos diferentes, e o LOCAL tem arquivos que
+só existem nele (`README-LOCAL.md`, `INICIAR-LOCAL.bat`, `chatbot-server/`,
+`generated/`).
+
+> ⚠️ **NUNCA** faça `git reset --hard` de um repositório para o outro: isso
+> apagaria os commits e os arquivos próprios do outro projeto.
+
+O jeito certo é **comparar antes e copiar só o que mudou**, com as ferramentas
+que já existem em `C:\DEEP-OS\tools\`:
+
+```powershell
+# 1. Descubra o commit ANTERIOR à sua mudança
+cd C:\DEEP-OS
+git log --oneline -5
+
+# 2. Compare: o que mudou desde aquele commit existe igual no gêmeo?
+python tools\comparar-local.py <commit-anterior>
+
+# 3. Se aparecer "DIFERENTE", PARE e revise à mão.
+#    Se for só IDENTICO / NOVO / AUSENTE, pode copiar:
+python tools\aplicar-no-local.py <commit-anterior>
+
+# 4. Verifique que o gêmeo continua funcionando
+cd C:\DEEP-OS-LOCAL
+.\backend\venv\Scripts\python.exe tests-manual\run_all.py
+```
+
+O passo 2 é o que torna a cópia segura: ele acusa qualquer arquivo que tenha
+**código próprio do gêmeo**, que seria sobrescrito e perdido.
+
+### DEPOIS DE ALTERAR, SEMPRE
+
+1. Rode a suíte nos **dois**: `python tests-manual/run_all.py` (19 arquivos)
+2. **Commit + push** no git dos **dois** (cada um no seu remoto e na sua branch)
+3. Sua mensagem final deve dizer **explicitamente** que o gêmeo foi sincronizado
+   — ou **por que** não foi
+
+### O que NÃO existe no gêmeo (de propósito)
+
+- `tools/verificar-deploy.cjs` — confere o deploy no VPS; o LOCAL não tem VPS
+- A pasta `Pessoal/` e os dados de `data/`, `downloads/` — são de cada máquina
+
+Documentação completa: [`docs/DOIS-PROJETOS.md`](docs/DOIS-PROJETOS.md)
+
+---
+
 ## Project Overview
 DEEP-OS is an AI Agent Operating System (Sistema Operacional de Agentes de IA). It orchestrates multiple specialized AI agents to automate software engineering tasks. Runs 100% locally with support for multiple LLM providers.
 

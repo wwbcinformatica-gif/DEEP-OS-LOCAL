@@ -425,6 +425,24 @@ Antes desta sessão esse caminho era impossível: o campo da OpenAI **não
 existia**, o placeholder `***saved***` sobrescrevia a chave real, o erro era
 engolido por `.catch(() => {})` e na VPS o `401` do middleware ficava invisível.
 
+**E a execução de ferramentas também foi confirmada** (mesma data). O pedido
+*"faça uma varredura procurando arquivos .gguf"* — o **exato cenário que
+falhava** antes, quando o modelo só anunciava o plano — agora executa de verdade
+e devolveu o resultado real:
+
+```
+/root/models/qwen2.5-coder-7b.gguf   4,4 GB   06/Set 19:18
+Nenhum .gguf dentro de /root/DEEP-OS
+```
+
+O resultado confere com o inventário do servidor (o único `.gguf` da VPS, que
+foi movido para `/root/models/` numa sessão anterior). Ou seja: o modelo não só
+executou a ferramenta como **leu o disco certo** e respondeu com dados reais.
+
+> **Nota sobre o modelo local na VPS:** a VPS tem 4 GB de RAM. Um 7B em Q4
+> (4,4 GB) mais o cache de contexto **não cabe** — rodaria com swap e ficaria
+> inviável. Esse `.gguf` é útil no PC (que tem GPU e 25+ modelos), não na VPS.
+
 **Ainda não testado com voz real** (precisa de microfone): a interrupção do
 Charon e a saudação curta. Ver a seção 14 mais abaixo para o roteiro.
 

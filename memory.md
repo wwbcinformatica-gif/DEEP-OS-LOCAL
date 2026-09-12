@@ -1,5 +1,36 @@
 # DEEP-OS — Memoria do Projeto
 
+> ## ⛔ REGRA Nº 1 — DOIS PROJETOS GÊMEOS (vale para todos os modelos de IA)
+>
+> Este projeto tem um gêmeo e **os dois precisam receber as MESMAS alterações**:
+>
+> | Projeto | Caminho | Git |
+> |---|---|---|
+> | DEEP-OS (principal, vai para a VPS) | `C:\DEEP-OS` | `origin` = `DEEP-OS.git`, branch `master` |
+> | DEEP-OS-LOCAL (roda local) | `C:\DEEP-OS-LOCAL` | `origin` = `DEEP-OS-LOCAL.git`, branch `main` |
+>
+> **NUNCA** faça `git reset` de um para o outro — são repositórios SEPARADOS,
+> com históricos próprios e arquivos exclusivos. Apagaria o trabalho do outro.
+>
+> Procedimento correto (comparar antes, copiar só o que mudou):
+> ```powershell
+> cd C:\DEEP-OS
+> git log --oneline -5                      # ache o commit ANTERIOR à mudança
+> python tools\comparar-local.py <commit>   # acusou DIFERENTE? PARE e revise
+> python tools\aplicar-no-local.py <commit> # só se não houver divergência
+> ```
+> Depois: rode a suíte nos DOIS, commit + push nos DOIS, e diga na resposta final
+> que o gêmeo foi sincronizado (ou por que não foi).
+>
+> **São ambientes DIFERENTES:** o DEEP-OS vai para a **VPS** (Linux headless,
+> 4 GB RAM, nginx, sem tela) e o LOCAL roda **na máquina do usuário** (Windows
+> com desktop, GPU, Ollama com 25+ modelos). O CÓDIGO é o mesmo, mas o
+> COMPORTAMENTO não: bug de proxy/`Host`/`401` só aparece na VPS; ferramenta que
+> abre app ou controla tela só funciona no LOCAL. Não "conserte" um quebrando o
+> outro (ex.: não remova o filtro `is_headless()`).
+>
+> Documentação completa: [`docs/DOIS-PROJETOS.md`](docs/DOIS-PROJETOS.md)
+
 ## Visao Geral
 Sistema operacional de agentes de IA com 3 modos de interacao:
 - **Chat** (texto) — Jarvis via OpenRouter ou modelos locais
@@ -12,8 +43,13 @@ Sistema operacional de agentes de IA com 3 modos de interacao:
 ### Ferramentas: o modelo "anunciava e nao fazia"
 **Documentacao: [`docs/FERRAMENTAS.md`](docs/FERRAMENTAS.md)**
 
-Queixa: *"o modelo fala que vai fazer e fica ali no plano de execucao e nao faz"*
-— com markup `<｜DSML｜...>` cru vazando no chat.
+✅ **CONFIRMADO PELO USUARIO EM PRODUCAO (2026-09-12):** o pedido *"faca uma
+varredura procurando arquivos .gguf"* — o cenario exato que falhava — agora
+executa de verdade e devolveu o resultado real (`/root/models/qwen2.5-coder-7b.gguf`,
+4,4 GB), conferindo com o inventario da VPS. Antes ele so anunciava o plano.
+
+Queixa original: *"o modelo fala que vai fazer e fica ali no plano de execucao e
+nao faz"* — com markup `<｜DSML｜...>` cru vazando no chat.
 
 **Dois bugs somados:**
 1. **DSML desconhecido** — DeepSeek V3.2/V4 (via OpenRouter) nao devolve

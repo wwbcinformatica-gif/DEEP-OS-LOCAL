@@ -118,6 +118,155 @@ const BROWSER_VOICE_MAP: Record<string, string[]> = {
 };
 
 /**
+ * Nomes de voz do NAVEGADOR que soam naturais, em ordem de preferencia.
+ *
+ * O `speechSynthesis` escolhe uma voz padrao que, no Windows, costuma ser a
+ * mais robotica disponivel. Preferir por NOME (e nao so por idioma) e o que
+ * separa uma voz aceitavel de uma voz "de robo".
+ *   - "natural"/"neural"/"online": vozes neurais do Edge/Chrome (as melhores);
+ *   - "google": vozes do Chrome, bem superiores as SAPI locais;
+ *   - Francisca/Thalita/Antonio/Maria/Daniel: vozes pt-BR conhecidas.
+ */
+const VOZES_NATURAIS_PREFERIDAS = [
+  'natural', 'neural', 'online', 'premium', 'enhanced',
+  'google', 'francisca', 'thalita', 'antonio', 'maria', 'daniel',
+];
+
+/**
+ * Prepara o texto para ser FALADO.
+ *
+ * POR QUE ISSO EXISTE
+ * Antes a limpeza era uma sequencia de `.replace` soltos com DOIS defeitos
+ * graves:
+ *
+ * 1. APAGAVA A LETRA "a" COM TIL. A alternancia incluia `ã` (U+00E3), entao
+ *    toda palavra em portugues com til perdia a letra:
+ *        "não"        -> "no"
+ *        "então"      -> "ento"
+ *        "informação" -> "informaço"
+ *        "manhã"      -> "manh"
+ *    "não" e uma das palavras mais frequentes do idioma: a fala saia errada o
+ *    tempo todo — exatamente o que se percebe como voz "robotica".
+ *
+ * 2. NAO TRATAVA O QUE NAO DEVE SER LIDO. Blocos de codigo iam para o audio
+ *    como codigo, e o rotulo de um link era removido deixando a URL — o
+ *    sintetizador lia "h t t p s dois pontos barra barra..." em voz alta.
+ *
+ * A regra agora e explicita: remove-se o que e MARCA (markdown), preserva-se o
+ * que e PALAVRA — inclusive acentos, cedilha e til.
+ */
+function prepararTextoParaFala(texto: string): string {
+  if (!texto) return '';
+  let t = texto;
+
+  // ── 1. O que NAO deve ser lido ───────────────────────────────────────────
+  // Bloco de codigo vira pausa: ler codigo em voz alta e inutil e soa pessimo.
+  t = t.replace(/```[\s\S]*?```/g, ' ... ');
+  // Codigo inline vira o proprio texto (sem as crases).
+  t = t.replace(/`([^`]+)`/g, '$1');
+  // Link: fala o ROTULO, nunca o endereco.
+  t = t.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  // URL solta: nao ha como falar isso, some.
+  t = t.replace(/https?:\/\/\S+/g, ' ');
+  // Marca de imagem: mantem a descricao (alt), que costuma ser util.
+  t = t.replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1');
+
+  // ── 2. Tabelas ────────────────────────────────────────────────────────────
+  // A linha de tracinhos do cabecalho de tabela nao tem conteudo falavel.
+  t = t.replace(/^[ \t]*\|?[ \t:|-]+\|[ \t:|-]*$/gm, ' ');
+  // As barras viram pausa curta, para as celulas nao grudarem.
+  t = t.replace(/[ \t]*\|[ \t]*/g, ', ');
+
+  // ── 3. Marcadores de estrutura no inicio da linha ─────────────────────────
+  t = t.replace(/^[ \t]*[-*+][ \t]+/gm, '');      // listas
+  t = t.replace(/^[ \t]*\d+[.)][ \t]+/gm, '');    // listas numeradas
+  t = t.replace(/^[ \t]*#{1,6}[ \t]+/gm, '');     // titulos
+  t = t.replace(/^[ \t]*>[ \t]?/gm, '');          // citacao
+  t = t.replace(/^[ \t]*[-=_]{3,}[ \t]*$/gm, ' '); // linhas horizontais
+
+  // ── 4. Enfase do markdown ─────────────────────────────────────────────────
+  // Remove o PAR de marcadores, preservando o conteudo (antes ficavam asteriscos
+  // soltos no meio da frase).
+  t = t.replace(/(\*\*|__)(.*?)\1/g, '$2');
+  t = t.replace(/(\*|_)(.*?)\1/g, '$2');
+  t = t.replace(/~~(.*?)~~/g, '$1');
+  // Sobras de marcadores
+  t = t.replace(/[#*_~]/g, '');
+
+  // ── 5. Simbolos com leitura propria ───────────────────────────────────────
+  // Sem isto o sintetizador le "R cifrao", "porcento" colado ou simplesmente
+  // ignora o simbolo e junta as palavras.
+  t = t.replace(/R\$\s*/g, ' reais ');
+  t = t.replace(/(\d)\s*%/g, '$1 por cento');
+  t = t.replace(/(\d)\s*km\/h/gi, '$1 quilometros por hora');
+  t = t.replace(/(\d)\s*GB\b/g, '$1 gigabytes');
+  t = t.replace(/(\d)\s*MB\b/g, '$1 megabytes');
+  t = t.replace(/\s*(?:→|->|=>)\s*/g, ' para ');
+  t = t.replace(/\s*&\s*/g, ' e ');
+  t = t.replace(/\s*=\s*/g, ' igual a ');
+  t = t.replace(/\s*\+\s*/g, ' mais ');
+  t = t.replace(/\bnº\s*/gi, 'numero ');
+  t = t.replace(/\.{3,}/g, ', ');          // reticencias viram pausa
+  t = t.replace(/[•·◦●]/g, ', ');          // bullets viram pausa
+
+  // ── 6. Emojis e simbolos graficos ─────────────────────────────────────────
+  // (o sintetizador costuma ler o NOME do emoji, o que quebra a frase)
+  t = t.replace(/[\u{1F300}-\u{1FAFF}]/gu, '');
+  t = t.replace(/[\u{2600}-\u{27BF}]/gu, '');
+  t = t.replace(/[\u{2B00}-\u{2BFF}]/gu, '');
+  t = t.replace(/[\u{FE00}-\u{FE0F}]/gu, '');
+  t = t.replace(/[\u{200D}]/gu, '');
+  t = t.replace(/[\u{20E3}]/gu, '');
+  t = t.replace(/[\u{E0020}-\u{E007F}]/gu, '');
+
+  // ── 7. Acentuacao: PRESERVADA de proposito ───────────────────────────────
+  // Nada aqui remove `ã`, `õ`, `ç`, `á`, `é`... Eles sao a propria palavra.
+  // (Foi exatamente essa remocao que deixou a fala errada antes.)
+
+  // ── 8. Normalizacao final ─────────────────────────────────────────────────
+  // Quebras de linha viram pausa de frase; espacos repetidos somem.
+  t = t.replace(/\r/g, '');
+  t = t.replace(/\n{2,}/g, '. ');
+  t = t.replace(/\n/g, ', ');
+  // Nao deixa pontuacao duplicada (", ." ou ". ,")
+  t = t.replace(/,\s*\./g, '.');
+  t = t.replace(/\.\s*,/g, '.');
+  t = t.replace(/([.!?])\1+/g, '$1');
+  t = t.replace(/\s{2,}/g, ' ');
+  t = t.replace(/^[\s,.;:]+/, '');
+  t = t.replace(/[\s,;:]+$/, '');
+  return t.trim();
+}
+
+/**
+ * Divide o texto em pedacos falaveis (uma ou duas frases cada).
+ *
+ * POR QUE: entregar um texto longo como UMA unica `SpeechSynthesisUtterance`
+ * faz o sintetizador perder a entonacao do meio para o fim — a leitura fica
+ * corrida e monotona. Falando frase por frase, o motor reinicia a prosodia a
+ * cada pedaco e as pausas entre eles saem naturais.
+ */
+function dividirEmFrases(texto: string, maxCaracteres = 220): string[] {
+  if (!texto) return [];
+  // Quebra em fim de frase, mantendo a pontuacao.
+  const partes = texto.match(/[^.!?]+[.!?]*/g) || [texto];
+  const pedacos: string[] = [];
+  let atual = '';
+  for (const parte of partes) {
+    const pedaco = parte.trim();
+    if (!pedaco) continue;
+    if (atual && (atual.length + pedaco.length + 1) > maxCaracteres) {
+      pedacos.push(atual);
+      atual = pedaco;
+    } else {
+      atual = atual ? `${atual} ${pedaco}` : pedaco;
+    }
+  }
+  if (atual) pedacos.push(atual);
+  return pedacos;
+}
+
+/**
  * Listas de modelos por provider.
  *
  * REGRA (aprendida do jeito dificil): so entra aqui modelo que respondeu
@@ -578,26 +727,33 @@ const JarvisPage: React.FC = () => {
     if (recognitionRef.current) recognitionRef.current.stop();
   };
 
+  /**
+   * Converte a barra de velocidade (0.5x a 3.0x) para o formato do Edge TTS.
+   *
+   * A barra e um MULTIPLICADOR (1.0 = normal), e o Edge espera PORCENTAGEM
+   * relativa ("+30%" = 30% mais rapido). Dai `(rate - 1) * 100`.
+   * O limite de +100% existe porque acima disso o provedor distorce a voz.
+   */
+  const velocidadeParaEdge = (rate: number) =>
+    Math.max(-50, Math.min(100, Math.round((rate - 1) * 100)));
+
+  /**
+   * Converte a barra de tom (0 a 100, 50 = neutro) para Hertz.
+   *
+   * 50 e o ponto neutro de proposito: assim o meio da barra devolve a voz
+   * original. Antes existia um `pitch="-15Hz"` FIXO no backend, o que deixava
+   * a voz mais grave sempre — e a barra sem efeito nenhum.
+   */
+  const tomParaEdge = (pitch: number) =>
+    Math.max(-60, Math.min(60, Math.round((pitch - 50) * 1.2)));
+
   const speak = async (text: string) => {
     const voiceOpt = VOICE_OPTIONS.find(v => v.key === selectedVoice) || VOICE_OPTIONS[0];
-    let clean = text
-      .replace(/\*\*/g, '')
-      .replace(/[#>*_`~\[\]{}|\\]/g, '')
-      .replace(/-{3,}/g, '')
-      .replace(/_{3,}/g, '')
-      .replace(/\.{3,}/g, '')
-      .replace(/•/g, '')
-      .replace(/sdkjf|ã|©|®|™|°/g, '')
-      .replace(/[\u{1F300}-\u{1F9FF}]/gu, '')
-      .replace(/[\u{2600}-\u{26FF}]/gu, '')
-      .replace(/[\u{2700}-\u{27BF}]/gu, '')
-      .replace(/[\u{FE00}-\u{FE0F}]/gu, '')
-      .replace(/[\u{200D}]/gu, '')
-      .replace(/[\u{20E3}]/gu, '')
-      .replace(/[\u{E0020}-\u{E007F}]/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
+    // Prepara o texto uma vez so; os dois caminhos (Edge e navegador) usam o
+    // mesmo resultado, para a fala nao mudar de comportamento ao trocar de voz.
+    const clean = prepararTextoParaFala(text);
     if (!clean) return;
+
     if (voiceOpt.type === 'edge') {
       try {
         synthRef.current?.cancel();
@@ -605,7 +761,13 @@ const JarvisPage: React.FC = () => {
         const res = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text: clean, voice: voiceOpt.voice }),
+          body: JSON.stringify({
+            text: clean,
+            voice: voiceOpt.voice,
+            // Velocidade e tom da tela, agora respeitados tambem no Edge.
+            rate: velocidadeParaEdge(voiceRate),
+            pitch: tomParaEdge(voicePitch),
+          }),
         });
         if (!res.ok) throw new Error(`TTS falhou: ${res.status}`);
         const blob = await res.blob();
@@ -618,7 +780,13 @@ const JarvisPage: React.FC = () => {
         audio.onerror = () => { setIsSpeaking(false); URL.revokeObjectURL(audio.src); updateLastProcess({ status: 'error' }); };
         await audio.play().catch(() => speakBrowser(clean, voiceOpt));
         return;
-      } catch (e) { console.warn('Edge TTS falhou:', e); }
+      } catch (e) {
+        // ANTES este erro era apenas um console.warn: o usuario nao tinha como
+        // saber que estava ouvindo a voz do NAVEGADOR (bem mais robotica) em vez
+        // da voz neural. Agora isso aparece no painel de execucao.
+        console.warn('Edge TTS falhou:', e);
+        addProcess('info', 'Voz do servidor indisponivel — usando a voz do navegador', 'A voz do navegador e mais robotica. Verifique a conexao com o servidor.', undefined, 1);
+      }
     }
     speakBrowser(clean, voiceOpt);
   };
@@ -627,19 +795,44 @@ const JarvisPage: React.FC = () => {
     if (!synthRef.current) synthRef.current = window.speechSynthesis;
     if (!synthRef.current) return;
     synthRef.current.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'pt-BR';
-    utterance.rate = voiceRate;
-    utterance.pitch = 0.5 + (voicePitch / 100) * 1.0;
+
     const voices = window.speechSynthesis?.getVoices() || [];
-    const keywords = BROWSER_VOICE_MAP[voiceOpt.key] || ['pt'];
     const normalized = (v: SpeechSynthesisVoice) => `${v.name.toLowerCase()} ${v.lang.toLowerCase()}`;
-    const foundVoice = voices.find(v => keywords.every(kw => normalized(v).includes(kw))) || voices.find(v => v.lang.startsWith('pt')) || voices[0];
-    if (foundVoice) utterance.voice = foundVoice;
-    utterance.onstart = () => setIsSpeaking(true);
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
-    synthRef.current.speak(utterance);
+    const keywords = BROWSER_VOICE_MAP[voiceOpt.key] || ['pt'];
+
+    // Escolha da voz, em ordem de qualidade:
+    //   1. a voz pedida pelo usuario (todos os termos batem);
+    //   2. uma voz pt-BR cujo NOME indique ser neural/natural (as boas);
+    //   3. qualquer voz pt;
+    //   4. o que existir.
+    // Antes parava no passo 3 — e a voz pt padrao do Windows e justamente a
+    // mais robotica, o que reforcava a sensacao de voz mecanica.
+    const candidatasPt = voices.filter(v => v.lang.toLowerCase().startsWith('pt'));
+    const naturalPt = candidatasPt.find(v =>
+      VOZES_NATURAIS_PREFERIDAS.some(nome => v.name.toLowerCase().includes(nome)));
+    const foundVoice =
+      voices.find(v => keywords.every(kw => normalized(v).includes(kw)))
+      || naturalPt
+      || candidatasPt[0]
+      || voices[0];
+
+    // Fala FRASE por FRASE (ver dividirEmFrases): um texto longo numa unica
+    // utterancia perde a entonacao do meio para o fim e soa corrido/monotono.
+    const pedacos = dividirEmFrases(text);
+    if (pedacos.length === 0) return;
+
+    setIsSpeaking(true);
+    pedacos.forEach((pedaco, i) => {
+      const utterance = new SpeechSynthesisUtterance(pedaco);
+      utterance.lang = 'pt-BR';
+      utterance.rate = voiceRate;
+      utterance.pitch = 0.5 + (voicePitch / 100) * 1.0;
+      if (foundVoice) utterance.voice = foundVoice;
+      // Mantem "falando" ate o ULTIMO pedaco terminar
+      utterance.onend = () => { if (i === pedacos.length - 1) setIsSpeaking(false); };
+      utterance.onerror = () => { if (i === pedacos.length - 1) setIsSpeaking(false); };
+      synthRef.current!.speak(utterance);
+    });
   };
 
   const audioRef = useRef<HTMLAudioElement | null>(null);

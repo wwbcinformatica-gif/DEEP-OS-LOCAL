@@ -919,6 +919,87 @@ def _load_identity() -> dict:
         return {}
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# HISTORICO DE CONVERSA NO CHARON (contexto da sessao Live)
+#
+# BUG RELATADO: "quando eu clico no historico o Charon nao consegue ver o
+# historico, ele sempre esta em um contexto novo".
+#
+# POR QUE ACONTECIA
+# O Gemini Live cria uma sessao nova a cada conexao e guarda o estado da conversa
+# no servidor DELE. O frontend salva os transcripts no localStorage e os mostra
+# na tela, mas nunca os enviava — entao, do ponto de vista do modelo, a conversa
+# realmente comecava do zero.
+#
+# LIMITES (por que existem)
+# Contexto grande custa latencia e tokens. Uma conversa de voz longa pode ter
+# centenas de falas; mandar tudo atrasaria a primeira resposta e poderia estourar
+# a janela do modelo. Entao cortamos por dois criterios ao mesmo tempo:
+#   - MAX_HISTORICO_TURNOS: as falas mais recentes;
+#   - MAX_HISTORICO_CHARS: o teto de caracteres (o que vier primeiro manda).
+# Preservamos SEMPRE o final da conversa, que e o que da continuidade real.
+# ─────────────────────────────────────────────────────────────────────────────
+MAX_HISTORICO_TURNOS = 40
+MAX_HISTORICO_CHARS = 12000
+
+
+def _montar_turnos_historico(history: list | None) -> list:
+    """
+    Converte os transcripts da tela em turnos do Gemini Live.
+
+    Entrada: [{"speaker": "user"|"charon", "text": "..."} , ...]
+    Saida:   [{"role": "user"|"model", "parts": [{"text": "..."}]}, ...]
+    """
+    if not history:
+        return []
+
+    # 1. Normaliza e descarta o que nao serve
+    limpos = []
+    for item in history:
+        if not isinstance(item, dict):
+            continue
+        texto = str(item.get("text") or "").strip()
+        if not texto:
+            continue
+        falante = str(item.get("speaker") or "").strip().lower()
+        # O assistente aparece como "charon" no frontend e "Charon" no backend.
+        papel = "user" if falante in ("user", "voce", "você", "usuario", "usuário") else "model"
+        limpos.append((papel, texto))
+
+    if not limpos:
+        return []
+
+    # 2. Corta pelo numero de turnos (mantendo o FIM da conversa)
+    limpos = limpos[-MAX_HISTORICO_TURNOS:]
+
+    # 3. Corta por caracteres, tambem do fim para o comeco
+    selecionados = []
+    total = 0
+    for papel, texto in reversed(limpos):
+        if total + len(texto) > MAX_HISTORICO_CHARS:
+            break
+        selecionados.append((papel, texto))
+        total += len(texto)
+    selecionados.reverse()
+
+    # 4. Junta falas consecutivas do mesmo papel.
+    #    O Gemini espera turnos alternados; varias falas seguidas do mesmo lado
+    #    viram uma so, preservando a ordem.
+    turnos = []
+    for papel, texto in selecionados:
+        if turnos and turnos[-1]["role"] == papel:
+            turnos[-1]["parts"][0]["text"] += "\n" + texto
+        else:
+            turnos.append({"role": papel, "parts": [{"text": texto}]})
+
+    # 5. A API exige que o PRIMEIRO turno seja do usuario. Se o corte por
+    #    tamanho deixou o assistente na frente, descartamos esse turno.
+    while turnos and turnos[0]["role"] != "user":
+        turnos.pop(0)
+
+    return turnos
+
+
 def _build_system_instruction(voice_name: str = "Charon", user_tz: str = "America/Sao_Paulo", user_locale: str = "pt-BR", extra_prompt: str = "") -> str:
     project_ctx = _load_project_context()
     context_block = f"\n\n--- CONTEXTO ---\n{project_ctx}" if project_ctx else ""
@@ -1023,6 +1104,8 @@ class VoiceSession:
         self._interrupted_at = 0.0
         self._audio_buffer: list[bytes] = []
         self._audio_flush_task: asyncio.Task | None = None
+        # Historico da conversa (transcripts) que sera enviado como contexto.
+        self._history: list = []
 
         # Contadores de log agregado (ver _handle_response).
         #
@@ -1036,9 +1119,22 @@ class VoiceSession:
         self._maior_delay_ms = 0.0
         self._ultimo_aviso_delay = 0.0
 
-    async def start(self, voice: str = "Charon", user_tz: str = "America/Sao_Paulo", user_locale: str = "pt-BR", extra_prompt: str = ""):
+    async def start(self, voice: str = "Charon", user_tz: str = "America/Sao_Paulo", user_locale: str = "pt-BR", extra_prompt: str = "", history: list | None = None):
         if self._running:
             return False
+
+        # Historico da conversa escolhida na tela.
+        #
+        # BUG RELATADO: "quando eu clico no historico o Charon nao consegue ver o
+        # historico, ele sempre esta em um contexto novo".
+        #
+        # Causa: o Gemini Live abre uma sessao NOVA a cada conexao e o estado da
+        # conversa fica no SERVIDOR do Gemini (nao no navegador). O frontend
+        # guardava os transcripts no localStorage e os exibia na tela, mas nunca
+        # os enviava — entao a sessao comecava vazia de fato.
+        #
+        # Aqui guardamos o historico para enviar como contexto logo apos conectar.
+        self._history = history or []
 
         t_start = asyncio.get_event_loop().time()
         api_key = _get_gemini_key()
@@ -1079,10 +1175,14 @@ class VoiceSession:
 
             self._receive_task = asyncio.create_task(self._receive_loop())
             self._keepalive_task = asyncio.create_task(self._keepalive_loop())
-            # Envia greeting apos 1s
+            # Abertura da sessao, apos 1s para o Gemini estabilizar:
+            #   - COM historico: envia os turnos antigos e pede uma RETOMADA curta;
+            #   - SEM historico: saudacao normal.
+            # Sem isso a sessao sempre comecava vazia — era o "contexto novo"
+            # reclamado pelo usuario ao abrir uma conversa do historico.
             if not self._briefing_sent:
                 self._briefing_sent = True
-                asyncio.create_task(self._send_startup_briefing())
+                asyncio.create_task(self._abrir_sessao())
 
             await self.ws.send_json({
                 "type": "connected",
@@ -1143,7 +1243,16 @@ class VoiceSession:
             if elapsed > 200:
                 print(f"[VoiceWS] send_audio lento: {elapsed:.0f}ms ({len(audio_data)} bytes)")
             self._last_audio_sent_time = asyncio.get_event_loop().time()
-            self._interrupted = False
+            # NAO resetar self._interrupted aqui.
+            #
+            # SEGUNDO ponto do mesmo bug (o primeiro estava no loop de recepcao).
+            # `send_audio` roda a CADA chunk do microfone (~20-60ms), entao esta
+            # linha desfazia a interrupcao logo em seguida — o Charon voltava a
+            # falar por cima do usuario. Sobreviveu a primeira correcao porque eu
+            # procurei o reset no caminho do RECEBIMENTO e nao no do ENVIO.
+            #
+            # Quem libera a interrupcao agora e o `turn_complete` do turno
+            # interrompido (ou o guarda de 3s em _handle_response).
         except Exception as e:
             print(f"[VoiceWS] Erro ao enviar audio: {e}")
             if "closed" in str(e).lower() or "disconnect" in str(e).lower():
@@ -1665,6 +1774,78 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             pass
 
         return types.FunctionResponse(id=fc.id, name=name, response={"result": result})
+
+    async def _abrir_sessao(self):
+        """
+        Decide como abrir a sessao: retomar a conversa anterior OU cumprimentar.
+
+        Existe para separar as duas situacoes, que precisam de falas diferentes:
+          - conversa NOVA  -> saudacao curta ("Ola Wilson, eu sou Charon...");
+          - conversa ANTIGA -> retomada curta, SEM se apresentar de novo (seria
+            estranho o Charon se reapresentar no meio de uma conversa).
+        """
+        await asyncio.sleep(1)
+        if not self.session or not self._running:
+            return
+
+        turnos = await self._enviar_historico()
+        if turnos:
+            await self._pedir_retomada(turnos)
+        else:
+            await self._send_startup_briefing()
+
+    async def _pedir_retomada(self, turnos_enviados: int):
+        """
+        Pede uma retomada curta depois de restaurar o historico.
+
+        O gatilho e explicito sobre NAO se reapresentar e sobre nao resumir a
+        conversa inteira: sem essas duas proibicoes o modelo tende a fazer um
+        resumo longo do que foi conversado, o que e ruim em voz.
+        """
+        trigger = (
+            f"Voce acabou de receber os {turnos_enviados} turnos anteriores desta conversa como contexto. "
+            "Retome de onde paramos SEM se reapresentar e SEM resumir o historico. "
+            "Diga em UMA frase curta (maximo 15 palavras) que voce lembra da conversa e pergunte o que ele quer fazer agora. "
+            "PROIBIDO: dizer seu nome, falar sobre o sistema, ferramentas ou funcionalidades, e listar o que foi conversado."
+        )
+        print(f"[VoiceWS] Historico restaurado ({turnos_enviados} turnos) — pedindo retomada curta")
+        self._turn_done_event.clear()
+        try:
+            await self.session.send_client_content(
+                turns={"parts": [{"text": trigger}]},
+                turn_complete=True,
+            )
+        except Exception as e:
+            print(f"[VoiceWS] Erro ao pedir retomada: {e}")
+
+    async def _enviar_historico(self) -> int:
+        """
+        Envia o historico da conversa escolhida como contexto da sessao Live.
+
+        Como funciona: `send_client_content` aceita uma LISTA de turnos e o
+        estado do chat fica no SERVIDOR do Gemini (confirmado na docstring do
+        SDK). Enviamos com `turn_complete=False` para que seja apenas contexto —
+        o modelo nao responde a cada turno antigo, so os absorve.
+
+        Detalhe do formato: o papel do assistente no Gemini Live e `model`, NAO
+        `assistant` (esse e o vocabulario do OpenAI). Usar o papel errado faz a
+        API rejeitar o turno.
+
+        Devolve quantos turnos foram enviados.
+        """
+        turnos = _montar_turnos_historico(self._history)
+        if not turnos:
+            return 0
+        try:
+            await self.session.send_client_content(turns=turnos, turn_complete=False)
+            print(f"[VoiceWS] Historico enviado: {len(turnos)} turnos "
+                  f"({sum(len(p['text']) for t in turnos for p in t['parts'])} chars)")
+            return len(turnos)
+        except Exception as e:
+            # Nao derruba a sessao por causa do historico: sem contexto o Charon
+            # ainda funciona, so nao lembra da conversa anterior.
+            print(f"[VoiceWS] Falha ao enviar historico (seguindo sem ele): {e}")
+            return 0
 
     async def _send_startup_briefing(self):
         await asyncio.sleep(1)
@@ -2219,6 +2400,14 @@ async def voice_websocket(ws: WebSocket):
                     user_tz = data.get("timezone", "America/Sao_Paulo")
                     user_locale = data.get("locale", "pt-BR")
                     inst_prompt = data.get("system_prompt", "")
+                    # Historico da conversa escolhida no historico da tela.
+                    # REGRA (definida pelo usuario): sessao aberta do zero NAO
+                    # restaura contexto; so quando ele clica numa conversa do
+                    # historico. Quem decide isso e o frontend, que manda a lista
+                    # vazia no primeiro caso.
+                    historico = data.get("history") or []
+                    if historico:
+                        print(f"[VoiceWS] Historico recebido: {len(historico)} falas")
                     inst_temp = data.get("temperature", 0.7)
 
                     # Registra o fuso do usuario no contexto. Sem isto, a action
@@ -2232,7 +2421,7 @@ async def voice_websocket(ws: WebSocket):
                     except Exception:
                         pass
 
-                    started = await session.start(voice=voice_from_config, user_tz=user_tz, user_locale=user_locale, extra_prompt=inst_prompt)
+                    started = await session.start(voice=voice_from_config, user_tz=user_tz, user_locale=user_locale, extra_prompt=inst_prompt, history=historico)
                     # Envia áudio acumulado no buffer
                     if started and _audio_buffer:
                         print(f"[VoiceWS] Enviando {len(_audio_buffer)} chunks do buffer")

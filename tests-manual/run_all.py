@@ -74,6 +74,10 @@ TESTES = [
      "TODOS OS TESTES PASSARAM"),
     ("test_dsml_tools.py", "Ferramentas: parser DSML (modelo que anuncia e nao executa)",
      "TODOS OS TESTES PASSARAM"),
+    ("test_charon_historico.py", "Charon: historico da conversa (contexto da sessao)",
+     "TODOS OS TESTES PASSARAM"),
+    ("test_voz_jarvis.py", "Voz do Jarvis: texto para fala e barras de velocidade/tom",
+     "TODOS OS TESTES PASSARAM"),
     ("audit_headless_tools.py", "Auditoria: quais tools carregam (headless)",
      "NAO importam/carregam: 0"),
 ]
