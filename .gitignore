@@ -102,3 +102,6 @@ check-*.cjs
 
 # Backups locais antes de reescrever documentacao (nossos, nao versionados)
 backup-docs/
+
+# Temporario da ferramenta de comparacao (tools/comparar-local.py)
+.comparacao-tmp.txt

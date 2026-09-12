@@ -1,4 +1,0 @@
-IDENTICOS=STATUS.md|backend/routes/voice_ws.py|docs/CHARON-VOZ.md|docs/CONTINUAR.md|frontend/src/components/saas/CharonPage.tsx|frontend/src/components/saas/JarvisPage.tsx|frontend/src/components/saas/chatStorage.ts|memory.md|tests-manual/test_charon_barge_in.py|tests-manual/test_charon_historico.py|tests-manual/test_historico_conversa.py
-NOVOS=
-AUSENTES=
-DIFERENTES=
