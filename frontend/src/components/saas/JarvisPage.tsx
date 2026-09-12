@@ -982,7 +982,13 @@ const JarvisPage: React.FC = () => {
               } else if (event.type === 'thinking') {
                 // O backend manda "[Passo N/M] Executando: X" — mostra como
                 // andamento do plano, nao como ruido.
-                addProcess('thinking', event.content || 'Pensando...', undefined, 'running');
+                //
+                // Status 'done' DE PROPOSITO: estas linhas sao registro do que
+                // ja aconteceu, nao tarefa em andamento. Quando eu as marquei
+                // como 'running', cada uma ganhava a barrinha animada e NENHUMA
+                // era fechada depois — o painel ficava "trabalhando" para sempre,
+                // mesmo com a resposta concluida. Foi queixa do usuario.
+                addProcess('thinking', event.content || 'Pensando...', undefined, 'done');
               } else if (event.type === 'task_checklist') {
                 // Plano completo da tarefa. Era IGNORADO antes: o usuario via
                 // apenas o texto que o modelo escreveu, sem estado real.
@@ -1028,6 +1034,14 @@ const JarvisPage: React.FC = () => {
 
       addProcess('info', 'Resposta concluida', `${tokenCount} tokens, ${fullAnswer.length} caracteres`);
       updateLastProcess({ status: 'done' });
+
+      // Rede de seguranca: fecha QUALQUER entrada que ainda esteja "running".
+      //
+      // Se o backend nao mandar o evento de fechamento (erro no meio, tool que
+      // nunca devolve, ou um tipo de evento novo que eu nao tratei), a entrada
+      // ficava com a barrinha animada para sempre — o painel parecia estar
+      // trabalhando mesmo com a resposta pronta.
+      setProcessLog(prev => prev.map(e => e.status === 'running' ? { ...e, status: 'done' as const } : e));
 
       if (fullAnswer && autoSpeakEnabled) speak(fullAnswer);
 

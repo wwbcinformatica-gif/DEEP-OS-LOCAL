@@ -271,6 +271,77 @@ check("limpar_markup_dsml" in c_stream and "limpar_markup_dsml" in c_complete,
       "o markup ainda pode aparecer cru no chat")
 
 print()
+print("=== 10. FiltroDSML: o marcador nao pode vazar no FLUXO ===")
+# O usuario continuou vendo o markup na tela MESMO com o parser funcionando. O
+# motivo: a limpeza existia so no texto FINAL; num stream, os tokens chegam em
+# pedacos arbitrarios e limpar token a token nao pega nada.
+from core.llm_native import FiltroDSML  # noqa: E402
+
+# 10a. Marcador PARTIDO em varios tokens (o caso que vazava)
+f = FiltroDSML()
+partes = [
+    "Vou executar agora: ",
+    "<" + V + "DS",
+    "ML" + V + "tool_calls>",
+    '<' + V + "DSML" + V + 'invoke name="bash">',
+    '<' + V + "DSML" + V + 'parameter name="command" string="true">ls</' + V + "DSML" + V + "parameter>",
+    "</" + V + "DSML" + V + "invoke>",
+    "</" + V + "DSML" + V + "tool_calls>",
+    " pronto.",
+]
+saida = "".join(f.alimentar(p) for p in partes) + f.finalizar()
+check("DSML" not in saida,
+      f"marcador partido entre tokens nao vaza (saida: {saida!r})",
+      f"o marcador vazou no fluxo: {saida!r}")
+check(f.viu_markup, "o filtro registra que houve markup", "viu_markup nao foi marcado")
+check("Vou executar agora:" in saida and "pronto." in saida,
+      "o texto util em volta foi preservado",
+      f"o texto util foi perdido: {saida!r}")
+
+# 10b. O caso EXATO do print do usuario: tag ilegivel, sem nome nem parametros
+f2 = FiltroDSML()
+saida2 = "".join(f2.alimentar(p) for p in [
+    "Sistema operacional, kernel, hostname ",
+    "<" + V + "DSML" + V + "og7d8j9uokjb1t4tq4l459m5f3>",
+]) + f2.finalizar()
+check("DSML" not in saida2, "tag ilegivel tambem nao vaza",
+      f"vazou: {saida2!r}")
+check(f2.viu_markup, "viu_markup detecta a tentativa de ferramenta",
+      "viu_markup nao detectou — o aviso ao usuario nao apareceria")
+
+# 10c. Texto comum precisa passar INTACTO e sem atraso
+f3 = FiltroDSML()
+normal = "".join(f3.alimentar(p) for p in ["Bom ", "dia, ", "Wilson. ", "Tudo ", "certo?"]) + f3.finalizar()
+check(normal == "Bom dia, Wilson. Tudo certo?",
+      "texto comum passa intacto (espacos entre tokens preservados)",
+      f"o texto foi alterado: {normal!r}")
+
+# 10d. Um "<" solto (sinal de menor, uso normal) nao pode travar o texto
+f4 = FiltroDSML()
+menor = "".join(f4.alimentar(p) for p in ["o valor e ", "< ", "10."]) + f4.finalizar()
+check("< 10." in menor or "<10" in menor.replace(" ", "<") or "10" in menor,
+      "um '<' de comparacao nao engole o texto seguinte",
+      f"o texto apos o '<' foi perdido: {menor!r}")
+check(len(menor) >= 12, f"o texto do '<' foi devolvido (len={len(menor)})",
+      f"o '<' segurou texto demais: {menor!r}")
+
+print()
+print("=== 11. Aviso honesto quando a chamada vem inutilizavel ===")
+# Sem isto, a resposta fica "concluida" e vazia — o usuario acha que ele
+# prometeu e nao entregou, sem entender por que.
+CHAT = BACKEND / "routes" / "chat.py"
+texto_chat = CHAT.read_text(encoding="utf-8")
+check("FiltroDSML" in texto_chat,
+      "o caminho de chat usa o filtro de fluxo",
+      "o chat simples continua transmitindo tokens CRUS (era o vazamento)")
+check("viu_markup" in texto_chat,
+      "o chat avisa quando o modelo tentou ferramenta e nada saiu",
+      "sem o aviso, a resposta fica vazia como se tivesse funcionado")
+check("limpar_markup_dsml" in texto_chat,
+      "o texto final salvo tambem e limpo",
+      "o texto final continua com markup (é o que fica na tela)")
+
+print()
 print("=" * 70)
 if falhas:
     print(f"RESULTADO: {len(falhas)} FALHA(S)")

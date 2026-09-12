@@ -18,10 +18,12 @@ from core.config import get_base_dir
 from core.lifecycle import LifecycleConfig, run_lifecycle
 from core.message_queue import message_queue, QueuedMessage
 from core.llm_native import (
+    FiltroDSML,
     build_conversation_messages,
     build_user_content,
     complete_chat,
     complete_chat_with_tools,
+    limpar_markup_dsml,
     stream_chat,
     stream_chat_with_tools,
 )
@@ -1811,9 +1813,37 @@ async def handle_question_stream(msg: Message) -> AsyncGenerator[dict, None]:
         yield {"type": "thinking", "content": "[Analisando sua pergunta...]"}
 
         full_answer = ""
+        # Filtro de fluxo: segura um marcador DSML mesmo quando ele chega
+        # PARTIDO entre tokens. Sem isto o usuario via `<｜DSML｜...>` passando na
+        # tela — a limpeza existia apenas no texto final, nao no fluxo.
+        filtro_dsml = FiltroDSML()
         async for token in stream_chat(msg.provider, msg.model, messages, msg.temperature, api_key=msg.api_key):
             full_answer += token
-            yield {"type": "token", "content": token}
+            seguro = filtro_dsml.alimentar(token)
+            if seguro:
+                yield {"type": "token", "content": seguro}
+
+        # Despeja o que ficou retido no buffer
+        resto = filtro_dsml.finalizar()
+        if resto:
+            yield {"type": "token", "content": resto}
+
+        # O texto final tambem precisa estar limpo (e o que fica salvo na tela)
+        full_answer = limpar_markup_dsml(full_answer)
+        if filtro_dsml.viu_markup and not full_answer.strip():
+            # O modelo TENTOU chamar ferramenta mas nada utilizavel saiu (ex.:
+            # `<｜DSML｜og7d8j9...>` sem nome nem parametros). Antes isso passava
+            # como resposta "concluida" e vazia, dando a impressao de que ele
+            # prometeu e nao entregou. Melhor dizer o que aconteceu.
+            full_answer = (
+                "O modelo tentou usar uma ferramenta, mas a chamada veio num formato "
+                "invalido e nao pode ser executada.\n\n"
+                "Isso costuma acontecer com modelos servidos pelo **OpenRouter `auto`** "
+                "ou com modelos DeepSeek sem suporte a ferramentas no provedor que "
+                "atendeu a requisicao.\n\n"
+                "**O que fazer:** escolha um modelo com suporte a ferramentas "
+                "(ex.: `openai/gpt-oss-120b` na Groq, ou Gemini) e repita o pedido."
+            )
 
         conn = get_conn()
         cur = conn.cursor()

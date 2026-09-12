@@ -640,13 +640,17 @@ def extrair_dsml(texto: str) -> list:
     return chamadas
 
 
-def limpar_markup_dsml(texto: str) -> str:
+def limpar_markup_dsml(texto: str, strip: bool = True) -> str:
     """
     Remove o markup DSML do que o usuario ve.
 
     Sem isto o chat mostra `<｜DSML｜tool_calls>` cru na conversa — foi o que o
     usuario relatou. Aqui NAO tentamos preservar o conteudo extraido: ele ja vai
     para a execucao da ferramenta, e repeti-lo no texto so poluiria a resposta.
+
+    `strip=False` existe para uso em FLUXO (ver `FiltroDSML`): num stream, cortar
+    os espacos das pontas colaria as palavras umas nas outras, porque cada token
+    chega separado.
     """
     if not texto or "DSML" not in texto:
         return texto
@@ -660,7 +664,76 @@ def limpar_markup_dsml(texto: str) -> str:
     # Sobras do marcador sem tag fechada
     limpo = re.sub(_DSML_FECHA, "", limpo)
     limpo = re.sub(_DSML_ABRE, "", limpo)
-    return limpo.strip()
+    return limpo.strip() if strip else limpo
+
+
+class FiltroDSML:
+    """
+    Filtra markup DSML de um FLUXO de tokens, sem deixar vazar nem pedaco.
+
+    POR QUE NAO BASTA O `limpar_markup_dsml`
+    Aquele limpa um texto COMPLETO. Num stream, porem, os tokens chegam em
+    pedacos arbitrarios: o modelo pode mandar `<｜DSML｜` num token e
+    `tool_calls>` no seguinte. Limpar token a token nao pega NADA — e por isso o
+    usuario continuou vendo o marcador na tela mesmo depois de o parser ja
+    funcionar: a limpeza existia, mas so no texto final, nao no fluxo.
+
+    COMO FUNCIONA
+    Acumula num buffer, remove o que ja esta completo e SEGURA um pedaco final
+    que ainda pode vir a ser o comeco de um marcador partido. O resto (seguro) e
+    devolvido na hora, entao a resposta continua aparecendo aos poucos.
+
+    Tambem registra `viu_markup`: se o modelo tentou chamar uma ferramenta mas
+    NADA utilizavel saiu (o caso do `<｜DSML｜og7d8j9...>` sem nome nem
+    parametros), quem chama pode avisar o usuario em vez de deixar a resposta
+    "concluida" sem ter feito nada.
+    """
+
+    # Final de buffer que pode ser o comeco de um marcador: "<", "</", "<｜",
+    # "<｜D", "<｜DS", "<｜DSM", "<｜DSML"... — seguramos esses casos.
+    _PARCIAL = re.compile(r"</?\s*[\uff5c|]?\s*(?:D(?:S(?:M(?:L)?)?)?)?$", re.IGNORECASE)
+
+    # Teto de segurança: se algo "parecido com marcador" nunca fechar, nao
+    # seguramos o texto para sempre.
+    MAX_SEGURADO = 600
+
+    def __init__(self) -> None:
+        self._buffer = ""
+        self.viu_markup = False
+
+    def alimentar(self, texto: str) -> str:
+        """Devolve o que ja pode ser exibido com seguranca."""
+        if not texto:
+            return ""
+        self._buffer += texto
+
+        if "DSML" in self._buffer:
+            self.viu_markup = True
+            # strip=False: cortar espacos das pontas colaria as palavras, porque
+            # cada token chega separado.
+            self._buffer = limpar_markup_dsml(self._buffer, strip=False)
+
+        # Segura um final que ainda pode virar marcador
+        corte = len(self._buffer)
+        ultimo_menor = self._buffer.rfind("<")
+        if ultimo_menor != -1 and self._PARCIAL.match(self._buffer[ultimo_menor:]):
+            # Nao segura indefinidamente (se o "<" for so um sinal de menor)
+            if len(self._buffer) - ultimo_menor <= self.MAX_SEGURADO:
+                corte = ultimo_menor
+
+        seguro = self._buffer[:corte]
+        self._buffer = self._buffer[corte:]
+        return seguro
+
+    def finalizar(self) -> str:
+        """Devolve o que sobrou no buffer (fim do stream)."""
+        resto = (
+            limpar_markup_dsml(self._buffer, strip=False)
+            if "DSML" in self._buffer
+            else self._buffer
+        )
+        self._buffer = ""
+        return resto
 
 
 def extrair_tools_do_texto(texto: str) -> list:
@@ -690,7 +763,6 @@ def _extract_tool_from_text(text: str) -> dict | None:
     if not text or len(text.strip()) < 5:
         return None
     text = text.strip()
-
     # Gemini XML format detection
     _tco = chr(60) + "tc" + "_" + "call" + chr(62)
     _tcc = chr(60) + "/tc" + "_" + "call" + chr(62)
