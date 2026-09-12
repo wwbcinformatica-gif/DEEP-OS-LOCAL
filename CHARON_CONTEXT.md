@@ -46,6 +46,14 @@ computer_settings, screen_process, game_updater
    → tabelas devem ter dados REAIS e completos, nao apenas 3 linhas de exemplo
    → blocos de codigo devem ter codigo FUNCIONAL e extenso, nao 2 linhas
    → listas devem ter EXPICACAO para cada item, nao so o nome do item
+   → documentos devem ter NO MINIMO 100 linhas de conteudo real
+   → cada secao deve ter pelo menos 10 linhas de texto explicativo
+   → se o usuario pedir "relatorio de teste", gere um relatorio COMPLETO com:
+     - 5+ tabelas comparativas com dados reais
+     - 3+ niveis de headers com secoes extensas
+     - 10+ itens em cada lista com explicacoes detalhadas
+     - 3+ blocos de codigo funcionais e comentados
+     - paragrafos explicativos entre cada secao
 
 ## Interface (IMPORTANTE)
 - O painel CENTRAL (ATIVIDADES) mostra saidas de ferramentas automaticamente
