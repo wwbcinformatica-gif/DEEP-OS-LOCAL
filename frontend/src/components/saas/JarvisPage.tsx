@@ -413,10 +413,21 @@ const LANG_LABELS: Record<string, string> = {
 
 const JarvisPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
-  const [activeConvId, setActiveConvId] = useState<string>(() => {
-    const convs = getConversations();
-    return convs[0]?.id || '';
-  });
+  // Comeca SEM conversa ativa.
+  //
+  // BUG RELATADO: "quando eu limpo o cache e entro novamente no jarvis ele
+  // deveria comecar com uma conversa limpa, mas ele traz a conversa anterior
+  // automaticamente".
+  //
+  // Aqui havia `convs[0]?.id` — ou seja, ao abrir o Jarvis ele adotava a
+  // conversa mais recente e carregava as mensagens dela. Quem quisesse um
+  // assunto novo tinha de clicar em "+" primeiro, e quem nao conhecia o
+  // mecanismo ficava sem entender por que a conversa antiga reaparecia.
+  //
+  // Agora abre limpo (mostra a saudacao inicial). A conversa e criada quando a
+  // PRIMEIRA mensagem e enviada, ja dentro do workspace ativo. As conversas
+  // antigas continuam no historico, alcancaveis pelo botao do nome.
+  const [activeConvId, setActiveConvId] = useState<string>('');
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [showConvMenu, setShowConvMenu] = useState(false);
   const [messages, setMessages] = useState<Message[]>([
@@ -506,6 +517,15 @@ const JarvisPage: React.FC = () => {
   // ignora. Uso ref (nao estado) porque precisa valer no mesmo commit.
   const carregandoConversaRef = useRef(false);
 
+  // Conversa recem-criada por nos mesmos (ao enviar a primeira mensagem).
+  //
+  // Quando o usuario manda a primeira mensagem sem conversa ativa, criamos uma
+  // e trocamos o `activeConvId`. O efeito de CARREGAR dispararia e reporia
+  // `messages` com o conteudo salvo — que e vazio, porque a conversa acabou de
+  // nascer — apagando a mensagem que o usuario enviou.
+  // Esta ref diz ao efeito de carregar: "esta troca fui eu, ignore".
+  const pularCarregamentoRef = useRef<string | null>(null);
+
   // ── Workspace (raiz) da conversa — pedido do usuario: "queria que o historico
   // tivesse um Workspaces estilo raiz igual aqui no dsh, mas sem atrapalhar o
   // visual do painel, tem que ser discreto".
@@ -522,6 +542,12 @@ const JarvisPage: React.FC = () => {
 
   useEffect(() => {
     if (!activeConvId) return;
+    // Troca feita por nos (primeira mensagem criando a conversa): nao ha o que
+    // carregar, e carregar apagaria a mensagem que o usuario acabou de enviar.
+    if (pularCarregamentoRef.current === activeConvId) {
+      pularCarregamentoRef.current = null;
+      return;
+    }
     carregandoConversaRef.current = true;
     const salvas = getMessages(activeConvId);
     // Restaura as mensagens gravadas; se nao houver nenhuma, mantem a saudacao.
@@ -938,6 +964,17 @@ const JarvisPage: React.FC = () => {
   const handleSendMessageDirect = async (text: string) => {
     if (!text.trim()) return;
 
+    // O Jarvis abre SEM conversa ativa (para comecar limpo). A conversa e criada
+    // aqui, na primeira mensagem, ja dentro do workspace ativo.
+    if (!activeConvId) {
+      const conv = createConversation(text.trim(), workspaceAtivo);
+      setConversations(getConversations());
+      setTodosWorkspaces(getWorkspaces());
+      // Avisa o efeito de carregar para nao mexer nas mensagens nesta troca
+      pularCarregamentoRef.current = conv.id;
+      setActiveConvId(conv.id);
+    }
+
     const userMessage: Message = {
       id: String(Date.now()),
       role: 'user',
@@ -1311,7 +1348,7 @@ const JarvisPage: React.FC = () => {
       <div style={s.chatLayout}>
         <div style={s.leftPanel}>
           <div style={s.convBar}>
-            <button onClick={newConversation} title="Nova conversa" style={s.convNewBtn}>+</button>
+            <button onClick={newConversation} title="Nova conversa (limpa) — nao apaga nenhuma conversa do historico" style={s.convNewBtn}>+</button>
             <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nova conversa'}</button>
             <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
             {/* ── Workspace: chip DISCRETO na barra ──────────────────────────
@@ -1373,6 +1410,20 @@ const JarvisPage: React.FC = () => {
             >{'\u2B07'}</button>
             {showConvMenu && (
               <div style={s.convDropdown}>
+                {/* Explicacao do mecanismo, no lugar onde a duvida acontece.
+                    O usuario relatou que "+" (esquerda) e o workspace (direita)
+                    ficavam confusos: parecia que um anulava o outro. Aqui fica
+                    claro que sao duas coisas independentes. */}
+                <div style={{ padding: '6px 8px', borderBottom: '1px solid #222', marginBottom: 2 }}>
+                  <div style={{ fontSize: 9, color: '#7a7a7a', lineHeight: 1.5 }}>
+                    <b style={{ color: '#00d9ff' }}>+</b> abre uma conversa <b>nova</b> (limpa).
+                    {' '}<b style={{ color: '#00d9ff' }}>◰</b> escolhe o <b>workspace</b> — a pasta
+                    onde as conversas se agrupam.
+                    <br />
+                    As duas coisas sao <b>independentes</b>: trocar de workspace nao apaga nada;
+                    clicar numa conversa abaixo <b>restaura</b> ela.
+                  </div>
+                </div>
                 {/* Agrupado por workspace, com a arvore discreta: a raiz em
                     caixa alta e cinza, as conversas indentadas abaixo dela.
                     Assim a lista fica organizada sem virar uma tela de pastas. */}

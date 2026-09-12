@@ -186,6 +186,59 @@ check("createConversation(undefined, workspaceAtivo)" in jarvis,
       "conversa nova cai sempre na raiz padrao")
 
 print()
+print("=== 6. Abrir o Jarvis deve comecar LIMPO ===")
+# BUG RELATADO: "quando eu limpo o cache e entro novamente no jarvis ele deveria
+# comecar com uma conversa limpa mas ele tras a conversa anterior automaticamente"
+#
+# O estado inicial era `convs[0]?.id` — o Jarvis adotava a conversa MAIS RECENTE
+# ao abrir e carregava as mensagens dela.
+m_init = re.search(r"const \[activeConvId, setActiveConvId\] = useState<string>\(([^;]*)\);", jarvis, re.S)
+inicial = m_init.group(1) if m_init else ""
+check("getConversations" not in inicial,
+      "o estado inicial NAO busca a conversa mais recente",
+      f"o Jarvis ainda abre na conversa anterior: {inicial.strip()[:90]!r}")
+check("''" in inicial or '""' in inicial,
+      "o estado inicial e vazio (sessao limpa)",
+      f"o estado inicial nao esta vazio: {inicial.strip()[:90]!r}")
+
+# Mas a conversa PRECISA ser criada na primeira mensagem, senao o historico
+# nunca existiria (o efeito de salvar exige um activeConvId).
+m_send = re.search(r"const handleSendMessageDirect = async \(text: string\) => \{(.*?)\n  \};", jarvis, re.S)
+corpo_send = m_send.group(1) if m_send else ""
+check(bool(corpo_send), "isolei o corpo do envio de mensagem", "nao achei handleSendMessageDirect")
+check("if (!activeConvId)" in corpo_send and "createConversation(text.trim(), workspaceAtivo)" in corpo_send,
+      "a primeira mensagem CRIA a conversa (no workspace ativo)",
+      "sem isto, abrir limpo significaria nunca salvar nada")
+
+# E a criacao nao pode apagar a mensagem recem-enviada (a corrida de novo)
+check("pularCarregamentoRef.current = conv.id" in corpo_send,
+      "a criacao avisa o efeito de carregar para nao mexer nas mensagens",
+      "a troca dispararia o carregamento e apagaria a mensagem do usuario")
+check(re.search(r"if \(pularCarregamentoRef\.current === activeConvId\)", jarvis) is not None,
+      "o efeito de carregar respeita esse aviso",
+      "o aviso existe mas o carregar nao o consulta")
+check(re.search(r"pularCarregamentoRef\.current = null", jarvis) is not None,
+      "o aviso e consumido uma unica vez (nao vale para sempre)",
+      "o aviso nunca e limpo — trocar de conversa depois nao carregaria nada")
+
+print()
+print("=== 7. O menu explica o mecanismo (queixa: 'confuso de entender') ===")
+# "+" (esquerda) e workspace (direita) pareciam se anular. A explicacao fica
+# dentro da propria lista, onde a duvida acontece.
+check("abre uma conversa" in jarvis and "escolhe o" in jarvis,
+      "a lista explica o que o '+' e o workspace fazem",
+      "a lista nao explica o mecanismo — o usuario continua sem entender")
+check("independentes" in jarvis,
+      "deixa explicito que as duas coisas sao independentes",
+      "nao fica claro que trocar de workspace nao apaga conversa")
+check("restaura" in jarvis,
+      "explica que clicar numa conversa RESTAURA ela",
+      "nao explica que clicar restaura a conversa")
+check("nao apaga nenhuma conversa do historico" in jarvis,
+      "o '+' avisa que criar conversa nova nao apaga nada",
+      "o '+' nao avisa que nao apaga o historico")
+
+print()
 print("=" * 70)
 if falhas:
     print(f"RESULTADO: {len(falhas)} FALHA(S)")
