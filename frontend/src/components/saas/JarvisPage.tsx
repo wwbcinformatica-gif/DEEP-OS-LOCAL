@@ -293,6 +293,7 @@ const JarvisPage: React.FC = () => {
   const [isTyping, setIsTyping] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
+  const [autoSpeakEnabled, setAutoSpeakEnabled] = useState(false);
   const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
   const [selectedProvider, setSelectedProvider] = useState('gemini');
   const [apiKey, setApiKey] = useState('');
@@ -704,7 +705,7 @@ const JarvisPage: React.FC = () => {
       addProcess('info', 'Resposta concluida', `${tokenCount} tokens, ${fullAnswer.length} caracteres`);
       updateLastProcess({ status: 'done' });
 
-      if (fullAnswer) speak(fullAnswer);
+      if (fullAnswer && autoSpeakEnabled) speak(fullAnswer);
 
     } catch (err: any) {
       addProcess('tool_error', `Erro: ${err.message}`, undefined, 'error');
@@ -894,8 +895,8 @@ const JarvisPage: React.FC = () => {
                   <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
                     {isListening ? '\u23F9' : '\uD83C\uDF99'}
                   </button>
-                  <button onClick={stopSpeaking} disabled={!isSpeaking} style={{ ...s.iconBtn, background: isSpeaking ? '#ef4444' : '#1a1a2e', color: isSpeaking ? '#fff' : '#666', opacity: isSpeaking ? 1 : 0.4 }} title={isSpeaking ? 'Parar voz' : 'Falante'}>
-                    {isSpeaking ? '\uD83D\uDD07' : '\uD83D\uDD08'}
+                  <button onClick={() => { if (isSpeaking) stopSpeaking(); setAutoSpeakEnabled(!autoSpeakEnabled); }} style={{ ...s.iconBtn, background: autoSpeakEnabled ? '#0c0' : '#1a1a2e', color: autoSpeakEnabled ? '#fff' : '#666' }} title={autoSpeakEnabled ? 'Falante ON (clique para desativar)' : 'Falante OFF (clique para ativar)'}>
+                    {autoSpeakEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07'}
                   </button>
                   <button onClick={stopGeneration} disabled={!isTyping} style={{ ...s.iconBtn, background: isTyping ? '#ef4444' : '#1a1a2e', color: isTyping ? '#fff' : '#666', opacity: isTyping ? 1 : 0.4 }} title="Parar geracao">
                     {'\u23F9'}
