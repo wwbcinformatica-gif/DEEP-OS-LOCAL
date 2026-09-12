@@ -604,9 +604,7 @@ const JarvisPage: React.FC = () => {
               <span style={{ color: '#00d9ff', fontSize: 12 }}>{'\uD83E\uDD16'}</span>
               <span style={{ fontSize: 12, color: '#00d9ff', fontWeight: 600 }}>Jarvis</span>
               <button style={s.settingsBtn} onClick={() => setShowSettings(true)}>{'\u2699\uFE0F'}</button>
-              <button style={{ ...s.settingsBtn, color: isTyping ? '#ef4444' : '#666', borderColor: isTyping ? '#ef4444' : '#333' }} onClick={isTyping ? stopGeneration : clearMessages} title={isTyping ? 'Parar geracao' : 'Limpar chat'}>
-                {isTyping ? '\u23F9' : '\uD83D\uDDD1\uFE0F'}
-              </button>
+              <button style={s.settingsBtn} onClick={clearMessages} title="Limpar chat">{'\uD83D\uDDD1\uFE0F'}</button>
             </div>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
               <select value={selectedProvider} onChange={(e) => { setSelectedProvider(e.target.value); const prov = PROVIDERS.find(p => p.id === e.target.value); if (prov && prov.models.length > 0) setSelectedModel(prov.models[0].id); }} style={s.modelSelect}>
@@ -675,6 +673,9 @@ const JarvisPage: React.FC = () => {
                   </button>
                   <button onClick={stopSpeaking} disabled={!isSpeaking} style={{ ...s.iconBtn, background: isSpeaking ? '#ef4444' : '#1a1a2e', color: isSpeaking ? '#fff' : '#666', opacity: isSpeaking ? 1 : 0.4 }} title={isSpeaking ? 'Parar voz' : 'Falante'}>
                     {isSpeaking ? '\uD83D\uDD07' : '\uD83D\uDD08'}
+                  </button>
+                  <button onClick={stopGeneration} disabled={!isTyping} style={{ ...s.iconBtn, background: isTyping ? '#ef4444' : '#1a1a2e', color: isTyping ? '#fff' : '#666', opacity: isTyping ? 1 : 0.4 }} title="Parar geracao">
+                    {'\u23F9'}
                   </button>
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
                   <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
