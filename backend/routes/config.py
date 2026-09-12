@@ -9,6 +9,37 @@ from core.auth import get_current_tenant_optional
 
 router = APIRouter(prefix="/api/config", tags=["Config"])
 
+# Valores que NUNCA devem ser gravados como chave de API.
+#
+# BUG CORRIGIDO: o frontend marcava as chaves ja salvas no estado/localStorage
+# com '***saved***' e enviava TODOS os providers ao salvar um deles. O backend
+# aceitava esse texto como chave valida (e truthy) e gravava no `.env`,
+# SOBRESCREVENDO a chave verdadeira do usuario — que parava de funcionar, mesmo
+# "estando salva".
+#
+# O frontend foi corrigido (nao envia mais o marcador nem os outros providers),
+# mas o backend tambem recusa, como defesa em profundidade.
+_PLACEHOLDERS_INVALIDOS = {
+    "***saved***", "***salvo***", "***", "saved", "salvo", "(vazia)", "(empty)",
+    "undefined", "null", "none", "changeme", "your-api-key", "cole_sua_chave_aqui",
+}
+
+
+def _chave_valida(valor) -> bool:
+    """False para vazio, nao-string e para os marcadores de placeholder."""
+    if not valor or not isinstance(valor, str):
+        return False
+    v = valor.strip()
+    if not v:
+        return False
+    if v.lower() in _PLACEHOLDERS_INVALIDOS:
+        return False
+    # Marcadores mascarados do tipo "sk-...abcd" ou "***...abcd"
+    if v.startswith("***") or ("..." in v and len(v) < 20):
+        return False
+    return True
+
+
 def _get_config_path() -> str:
     from pathlib import Path
     return str(Path(__file__).resolve().parent.parent.parent / "config.yaml")
@@ -350,11 +381,20 @@ async def update_api_key(config: ApiKeyConfig):
         from pathlib import Path
         cfg_path = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
         env_path = Path(__file__).resolve().parent.parent / ".env"
+
+        # Nao gravar placeholder (evita destruir a chave real; ver _chave_valida)
+        if not _chave_valida(config.gemini_api_key):
+            raise HTTPException(
+                status_code=400,
+                detail="Valor invalido para a chave. Digite a chave real (o marcador "
+                       "'***saved***' indica que ja existe uma salva).",
+            )
+
         if cfg_path.exists():
             data = json.loads(cfg_path.read_text(encoding="utf-8"))
         else:
             data = {}
-        data["gemini_api_key"] = config.gemini_api_key
+        data["gemini_api_key"] = config.gemini_api_key.strip()
         cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
 
         # Write to .env AND update os.environ
@@ -376,6 +416,10 @@ async def update_api_key(config: ApiKeyConfig):
         os.environ["GEMINI_API_KEY"] = config.gemini_api_key
 
         return {"status": "success", "message": "Chave API salva no servidor"}
+    except HTTPException:
+        # Sem isto o 400 acima seria capturado pelo except generico e viraria 500,
+        # escondendo do frontend que o valor foi recusado.
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar chave: {e}")
 
@@ -401,11 +445,44 @@ async def update_api_keys(request: dict):
             "OPENCODE_API_KEY": "opencode_api_key",
             "ZHIPU_API_KEY": "zhipu_api_key",
         }
+
+        # Provedores COMUNS que foram adicionados ao registro e ainda nao estao
+        # no mapa fixo acima. Sem isto, a chave do DeepSeek (por exemplo) seria
+        # silenciosamente ignorada no salvamento — exatamente a classe de bug do
+        # `openai` sem campo na interface.
+        try:
+            from core.provedores import PRESETS
+
+            for pid, meta in PRESETS.items():
+                env = meta.get("key_env")
+                if env and env not in key_map:
+                    key_map[env] = f"{pid}_api_key"
+        except Exception:
+            pass
+
+        # Provedores PERSONALIZADOS criados pelo usuario pela interface.
+        # O nome da variavel segue o padrao `<ID>_API_KEY`, entao nao precisa de
+        # alteracao de codigo para um provedor novo ser salvo.
+        try:
+            from core.provedores import ids_personalizados
+
+            for pid in ids_personalizados():
+                env = f"{pid.upper()}_API_KEY"
+                key_map.setdefault(env, f"{pid}_api_key")
+        except Exception:
+            pass
+
         updated = []
+        recusados = []
         for env_key, json_key in key_map.items():
-            if env_key in request and request[env_key]:
-                data[json_key] = request[env_key]
-                updated.append(env_key)
+            if env_key not in request or not request[env_key]:
+                continue
+            if not _chave_valida(request[env_key]):
+                # Placeholder/mascarado: NAO gravar (destruiria a chave real)
+                recusados.append(env_key)
+                continue
+            data[json_key] = request[env_key].strip()
+            updated.append(env_key)
         cfg_path.write_text(json.dumps(data, indent=4, ensure_ascii=False), encoding="utf-8")
 
         # Write to .env AND update os.environ
@@ -418,23 +495,141 @@ async def update_api_keys(request: dict):
             stripped = line.strip()
             if stripped and not stripped.startswith('#') and '=' in stripped:
                 key_name = stripped.split('=', 1)[0].strip()
-                if key_name in key_map and key_name in request and request[key_name]:
-                    new_lines.append(f"{key_name}={request[key_name]}")
+                if key_name in key_map and _chave_valida(request.get(key_name)):
+                    new_lines.append(f"{key_name}={request[key_name].strip()}")
                     env_keys_written.add(key_name)
-                    os.environ[key_name] = request[key_name]
+                    os.environ[key_name] = request[key_name].strip()
                 else:
                     new_lines.append(line)
             else:
                 new_lines.append(line)
         for env_key in key_map:
-            if env_key in request and request[env_key] and env_key not in env_keys_written:
-                new_lines.append(f"{env_key}={request[env_key]}")
-                os.environ[env_key] = request[env_key]
+            if _chave_valida(request.get(env_key)) and env_key not in env_keys_written:
+                new_lines.append(f"{env_key}={request[env_key].strip()}")
+                os.environ[env_key] = request[env_key].strip()
         env_path.write_text('\n'.join(new_lines) + '\n', encoding="utf-8")
 
-        return {"status": "success", "updated": updated}
+        resposta = {"status": "success", "updated": updated}
+        if recusados:
+            resposta["recusados"] = recusados
+            resposta["aviso"] = (
+                "Alguns valores foram recusados por parecerem mascarados/placeholder "
+                "(ex: '***saved***'). Nenhuma chave existente foi alterada por eles."
+            )
+        return resposta
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Erro ao salvar chaves: {e}")
+
+
+# Modelo usado para testar cada provedor (barato e rapido).
+# Usado so quando o frontend nao manda um modelo.
+_MODELO_DE_TESTE = {
+    "gemini": "gemini-2.5-flash",
+    "groq": "openai/gpt-oss-20b",
+    "openrouter": "openai/gpt-4o-mini",
+    "openai": "gpt-4o-mini",
+    "nvidia": "nvidia/nemotron-3-super-120b-a12b",
+    "zhipu": "glm-4.6",
+    "mimo": "mimo-v2.5",
+    "opencode": "deepseek-v4-flash-free",
+    "openclaude": "claude-sonnet-4-6",
+    "ollama": "qwen2.5-coder:7b",
+}
+
+
+class TestarChavePayload(BaseModel):
+    provider: str
+    model: str = ""
+
+
+@router.post("/testar-chave")
+async def testar_chave(payload: TestarChavePayload):
+    """
+    Testa a chave de um provedor com uma chamada de chat REAL.
+
+    POR QUE ISTO EXISTE
+    O usuario perdeu bastante tempo com chaves que "pareciam salvas" e nao
+    funcionavam: a tela dizia "salvo" e o erro real ficava escondido. Este
+    endpoint responde a pergunta que importa — "esta chave funciona?" — usando
+    o MESMO caminho de codigo que o chat usa (`core.llm_native.complete_chat`),
+    entao o veredito reflete a realidade e nao uma verificacao paralela.
+
+    Nao usa `/models` de proposito: descobrimos que esse endpoint mente (o do
+    OpenRouter e publico e responde com chave falsa; o da NVIDIA lista modelos
+    que a conta nao tem). So a chamada de chat prova.
+    """
+    import asyncio
+
+    provider = (payload.provider or "").strip().lower()
+    if not provider:
+        raise HTTPException(status_code=400, detail="Informe o provedor.")
+
+    model = (payload.model or "").strip() or _MODELO_DE_TESTE.get(provider, "")
+    if not model:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Nao sei qual modelo usar para testar '{provider}'. Informe o modelo.",
+        )
+
+    try:
+        from core.llm_native import complete_chat
+
+        texto = await asyncio.wait_for(
+            complete_chat(
+                provider,
+                model,
+                [{"role": "user", "content": "Responda apenas: OK"}],
+                0.0,
+            ),
+            timeout=25,
+        )
+        return {
+            "ok": True,
+            "provider": provider,
+            "model": model,
+            "resposta": (texto or "").strip()[:120],
+            "mensagem": f"Chave valida — {model} respondeu.",
+        }
+
+    except asyncio.TimeoutError:
+        return {
+            "ok": False,
+            "provider": provider,
+            "model": model,
+            "mensagem": "Tempo esgotado (25s). O provedor nao respondeu — verifique a conexao do servidor.",
+        }
+    except Exception as e:
+        bruto = str(e)
+        baixo = bruto.lower()
+
+        # Traduz o erro tecnico para algo acionavel. Cada caso aqui ja apareceu
+        # de verdade nas chaves deste projeto.
+        if "401" in bruto or "unauthorized" in baixo or "incorrect api key" in baixo or "no auth" in baixo or "user not found" in baixo:
+            dica = "Chave INVALIDA ou revogada. Gere uma nova no painel do provedor e salve de novo."
+        elif "402" in bruto or "insufficient" in baixo or "balance" in baixo or "quota" in baixo or "余额不足" in bruto:
+            dica = "Conta SEM SALDO/limite atingido. Recarregue a conta do provedor (nao e erro da chave)."
+        elif "429" in bruto or "rate limit" in baixo:
+            dica = "Limite de uso atingido (429). Espere um pouco ou recarregue a conta."
+        elif "404" in bruto or "not found" in baixo or "does not exist" in baixo:
+            dica = f"Modelo '{model}' nao existe mais neste provedor. Escolha outro modelo na lista."
+        elif "connect" in baixo or "refused" in baixo or "timeout" in baixo or "getaddrinfo" in baixo:
+            dica = (
+                "Nao consegui conectar. Se for 'openclaude', ele aponta para um servidor "
+                "LOCAL (localhost:4000) que precisa estar rodando."
+            )
+        else:
+            dica = "Falha ao testar. Veja a mensagem tecnica abaixo."
+
+        return {
+            "ok": False,
+            "provider": provider,
+            "model": model,
+            "mensagem": dica,
+            "erro": bruto[:400],
+        }
+
 
 @router.get("/api-keys")
 async def get_api_keys():
@@ -458,6 +653,22 @@ async def get_api_keys():
             "opencode_api_key": "opencode",
             "zhipu_api_key": "zhipu",
         }
+
+        # Provedores comuns novos e personalizados tambem reportam `has_key`.
+        #
+        # Sem isto, a interface mostraria "(vazia)" para uma chave que JA esta
+        # salva — e o usuario salvaria de novo achando que perdeu. O padrao do
+        # nome vem de `provedores.env_key_do_id()` (uma fonte so).
+        try:
+            from core.provedores import PRESETS, ids_personalizados
+
+            for pid in PRESETS:
+                key_map.setdefault(f"{pid}_api_key", pid)
+            for pid in ids_personalizados():
+                key_map.setdefault(f"{pid}_api_key", pid)
+        except Exception:
+            pass
+
         for json_key, name in key_map.items():
             val = data.get(json_key, "")
             if val and len(val) > 10:
@@ -469,6 +680,222 @@ async def get_api_keys():
         return result
     except Exception:
         return {}
+
+# ─────────────────────────────────────────────────────────────────────────────
+# PROVEDORES — comuns + personalizados (criados pelo usuario)
+#
+# POR QUE EXISTE
+# O usuario pediu: "pode inserir outros provedores ou uma opcao para que eu crie
+# provedores novos, pois sempre tem provedores novos; ja deixa no projeto os
+# mais comuns incluso".
+#
+# Motivo concreto: `openai`, `opencode` e `openclaude` eram suportados pelo
+# backend mas NAO tinham campo na interface — nao havia onde colar a chave.
+# Com um registro, adicionar provedor deixa de exigir mexer em codigo.
+#
+# ATENCAO: estas rotas precisam vir ANTES do catch-all `/{section}` no fim do
+# arquivo (o FastAPI resolve por ordem de registro).
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ProvedorPayload(BaseModel):
+    id: str = ""
+    label: str = ""
+    base_url: str = ""
+    models: list = []
+    aviso: str = ""
+    local: bool = False
+
+
+class BuscarModelosPayload(BaseModel):
+    provider: str = ""
+    base_url: str = ""
+    api_key: str = ""
+
+
+@router.get("/provedores")
+async def listar_provedores():
+    """
+    Lista os provedores comuns (presets) e os personalizados do usuario.
+
+    A interface usa isto para montar o seletor e os campos de chave — assim um
+    provedor novo deixa de precisar de alteracao no frontend.
+    """
+    from core import provedores
+
+    dados = provedores.listar()
+    dados["total"] = len(dados["comuns"]) + len(dados["personalizados"])
+    return dados
+
+
+@router.post("/provedores")
+async def salvar_provedor(payload: ProvedorPayload):
+    """
+    Cria ou atualiza um provedor personalizado.
+
+    Nao testa a conexao aqui de proposito: salvar e testar sao coisas separadas
+    (uma rede instavel faria "salvar" falhar sem necessidade). Para testar
+    existe POST /api/config/testar-chave.
+    """
+    from core import provedores
+
+    try:
+        registro = provedores.salvar({
+            "id": payload.id,
+            "label": payload.label,
+            "base_url": payload.base_url,
+            "models": payload.models,
+            "aviso": payload.aviso,
+            "local": payload.local,
+        })
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Erro ao salvar provedor: {e}")
+
+    return {
+        "status": "success",
+        "provedor": registro,
+        "mensagem": (
+            f"Provedor '{registro['label']}' salvo. Agora cole a chave em "
+            f"{registro['key_env']} e clique em Testar."
+        ),
+    }
+
+
+@router.delete("/provedores/{pid}")
+async def remover_provedor(pid: str):
+    """
+    Remove um provedor personalizado.
+
+    A chave permanece no .env: remover por engano e recriar com o mesmo nome
+    volta a funcionar sem redigitar nada.
+    """
+    from core import provedores
+
+    if provedores.remover(pid):
+        return {"status": "success", "mensagem": f"Provedor '{pid}' removido."}
+    raise HTTPException(status_code=404, detail=f"Provedor personalizado '{pid}' nao encontrado.")
+
+
+@router.post("/provedores/modelos")
+async def buscar_modelos_do_provedor(payload: BuscarModelosPayload):
+    """
+    Busca a lista de modelos no endpoint /models do provedor.
+
+    Serve para preencher o formulario de provedor novo sem digitar modelo por
+    modelo. Aceita `provider` (usa a chave ja salva) OU `base_url` + `api_key`
+    (para testar antes de salvar).
+
+    AVISO HONESTO sobre o resultado: `/models` mente em varios provedores.
+      - O do OpenRouter e PUBLICO: devolve modelos mesmo com chave falsa.
+      - O da NVIDIA lista modelos que a conta NAO tem habilitados.
+    Por isso o retorno traz `confiavel: False` nesses casos, e a interface avisa
+    que a lista e uma sugestao — o que prova o modelo e o botao Testar.
+    """
+    import httpx
+
+    provider = (payload.provider or "").strip().lower()
+    base_url = (payload.base_url or "").strip().rstrip("/")
+    chave = (payload.api_key or "").strip()
+
+    # Descobre a URL base e a chave
+    if provider:
+        from core.provedores import resolver
+
+        meta = resolver(provider)
+        if not meta:
+            raise HTTPException(status_code=404, detail=f"Provedor '{provider}' nao registrado.")
+        base_url = base_url or (meta.get("base_url") or "").rstrip("/")
+        if not chave:
+            import os
+
+            chave = os.environ.get(meta.get("key_env") or "", "")
+            if not chave:
+                try:
+                    import json
+                    from pathlib import Path
+
+                    cfg = Path(__file__).resolve().parent.parent / "config" / "api_keys.json"
+                    if cfg.exists():
+                        dados = json.loads(cfg.read_text(encoding="utf-8"))
+                        chave = dados.get(f"{provider}_api_key", "") or dados.get("gemini_api_key", "")
+                except Exception:
+                    chave = ""
+
+    if not base_url:
+        raise HTTPException(status_code=400, detail="Informe a URL base do provedor.")
+
+    url = base_url + "/models"
+    cabecalhos = {"Accept": "application/json"}
+    if chave:
+        cabecalhos["Authorization"] = f"Bearer {chave}"
+
+    try:
+        async with httpx.AsyncClient(timeout=25) as client:
+            resp = await client.get(url, headers=cabecalhos)
+    except Exception as e:
+        return {
+            "ok": False,
+            "modelos": [],
+            "mensagem": f"Nao consegui acessar {url}: {e}",
+        }
+
+    if resp.status_code != 200:
+        return {
+            "ok": False,
+            "modelos": [],
+            "mensagem": (
+                f"O provedor respondeu HTTP {resp.status_code} em {url}. "
+                "Confira a URL base e a chave (a URL costuma terminar em /v1)."
+            ),
+        }
+
+    try:
+        dados = resp.json()
+    except Exception:
+        return {"ok": False, "modelos": [], "mensagem": f"{url} nao devolveu JSON."}
+
+    brutos = dados.get("data") or dados.get("models") or []
+    modelos = []
+    for m in brutos:
+        if isinstance(m, str):
+            modelos.append({"id": m, "label": m})
+            continue
+        mid = m.get("id") or m.get("name") or m.get("model")
+        if not mid:
+            continue
+        # Gemini devolve "models/gemini-3.6-flash"; o SDK espera sem o prefixo
+        mid = str(mid).replace("models/", "")
+        modelos.append({"id": mid, "label": mid})
+
+    # Ordena e remove repetidos
+    vistos = set()
+    unicos = []
+    for m in sorted(modelos, key=lambda x: x["id"]):
+        if m["id"] not in vistos:
+            vistos.add(m["id"])
+            unicos.append(m)
+
+    # Provedores cujo /models nao serve para validar nada (ver docstring)
+    NAO_CONFIAVEIS = {"openrouter", "nvidia"}
+    confiavel = provider not in NAO_CONFIAVEIS
+
+    return {
+        "ok": True,
+        "provider": provider,
+        "base_url": base_url,
+        "total": len(unicos),
+        "modelos": unicos,
+        "confiavel": confiavel,
+        "mensagem": (
+            f"{len(unicos)} modelos encontrados."
+            + ("" if confiavel else
+               " ATENCAO: neste provedor o /models nao e confiavel — ele lista "
+               "modelos que a sua conta pode nao ter. Use o botao Testar para "
+               "confirmar os que voce for usar.")
+        ),
+    }
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # CATCH-ALL — SEMPRE NO FIM DO ARQUIVO

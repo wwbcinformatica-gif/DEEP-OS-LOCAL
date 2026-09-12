@@ -9,13 +9,21 @@ logger = logging.getLogger("chatbot")
 router = APIRouter()
 
 # Configuracao padrao do ChatBot
+#
+# IDs de modelo corrigidos: os antigos nao existem mais nas APIs e faziam o
+# chatbot falhar logo na primeira mensagem.
+#   "llama3"            -> nao existe no Ollama desta maquina
+#                          (config.yaml usa qwen2.5-coder:7b como keeper_model)
+#   "gemini-2.0-flash"  -> removido pela API do Google (404 confirmado)
+#   "gpt-3.5-turbo"     -> modelo legado; trocado por gpt-4o-mini
+# Ver tools/MODELOS-PROVADOS.md.
 _chatbot_config = {
     "provider": "ollama",
-    "model": "llama3",
+    "model": "qwen2.5-coder:7b",
     "ollama_url": "http://localhost:11434",
-    "gemini_model": "gemini-2.0-flash",
+    "gemini_model": "gemini-2.5-flash",
     "gemini_api_key": "",
-    "openai_model": "gpt-3.5-turbo",
+    "openai_model": "gpt-4o-mini",
     "openai_api_key": "",
 }
 
@@ -116,7 +124,7 @@ async def _test_gemini(message: str) -> dict:
     if not api_key:
         return {"error": "GEMINI_API_KEY nao configurada no servidor"}
 
-    model = _chatbot_config.get("gemini_model", "gemini-2.0-flash")
+    model = _chatbot_config.get("gemini_model", "gemini-2.5-flash")
 
     try:
         async with httpx.AsyncClient(timeout=15) as client:

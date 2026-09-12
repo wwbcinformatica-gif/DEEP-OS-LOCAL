@@ -69,5 +69,7 @@ MODEL_ROUTING = {
     "coding": {"provider": "groq", "model": "openai/gpt-oss-120b"},
     "reasoning": {"provider": "groq", "model": "openai/gpt-oss-120b"},
     "premium": {"provider": "openai", "model": "gpt-4o"},
-    "analysis": {"provider": "gemini", "model": "gemini-1.5-pro"},
+    # "gemini-1.5-pro" foi extinto pela API do Google (404 confirmado em
+    # 2026-09; ver tools/MODELOS-PROVADOS.md). Toda chamada de analise falhava.
+    "analysis": {"provider": "gemini", "model": "gemini-2.5-flash"},
 }

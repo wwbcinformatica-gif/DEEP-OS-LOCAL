@@ -13,12 +13,23 @@ interface Instance {
   created_at: string;
 }
 
+/**
+ * Modelos oferecidos ao criar uma instancia.
+ *
+ * `gemini-2.0-flash` foi trocado por `gemini-3.5-flash`: o 2.0 nao existe mais
+ * na API do Google (confirmado com chamada real — ver tools/MODELOS-PROVADOS.md).
+ * Criar uma instancia com ele dava erro em toda mensagem.
+ */
 const MODELS = [
+  { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash', provider: 'gemini' },
+  { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash', provider: 'gemini' },
   { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', provider: 'gemini' },
-  { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', provider: 'gemini' },
   { id: 'openrouter/auto', label: 'OpenRouter Auto', provider: 'openrouter' },
   { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini', provider: 'openrouter' },
+  { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6', provider: 'openrouter' },
   { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B', provider: 'openrouter' },
+  { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B (Groq)', provider: 'groq' },
+  { id: 'nvidia/nemotron-3-super-120b-a12b', label: 'Nemotron 3 Super 120B (NVIDIA)', provider: 'nvidia' },
 ];
 
 const InstancesPage: React.FC = () => {

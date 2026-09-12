@@ -1016,6 +1016,11 @@ class VoiceSession:
         self._last_audio_sent_time = 0
         self._reconnecting = False
         self._interrupted = False
+        # Momento em que a interrupcao comecou. Serve de rede de seguranca: se o
+        # Gemini nao mandar turn_complete para o turno interrompido, o Charon
+        # ficaria surdo para sempre (todo audio novo seria descartado). Ver o
+        # guarda de tempo em _handle_response.
+        self._interrupted_at = 0.0
         self._audio_buffer: list[bytes] = []
         self._audio_flush_task: asyncio.Task | None = None
 
@@ -1670,9 +1675,34 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
         assistant_name = identity.get("assistant_name", "") or self._voice
         user_name = identity.get("user_name", "") or ""
 
-        trigger = f"Se apresente para {user_name} agora. Diga seu nome, horario e como pode ajudar." if user_name else "Se apresente agora. Diga seu nome e horario."
+        # Saudacao CURTA e FIXA.
+        #
+        # ANTES: o gatilho era "Se apresente para {user_name} agora. Diga seu
+        # nome, horario e como pode ajudar." — um convite aberto. O Gemini Live
+        # obedecia falando uma introducao longa: o que e o sistema, quais
+        # ferramentas tem, o que sabe fazer, o horario... O usuario pediu de
+        # volta a saudacao breve de antes:
+        #     "Ola Wilson, eu sou Charon. O que gostaria de fazer agora?"
+        #
+        # Por isso o gatilho agora diz o TEXTO EXATO e proibe explicitamente os
+        # assuntos que faziam a fala se estender. Modelos de audio tendem a
+        # "encher linguica" quando a instrucao deixa margem, entao as proibicoes
+        # sao tao importantes quanto o pedido.
+        if user_name:
+            exemplo = f"Ola {user_name}, eu sou {assistant_name}. O que gostaria de fazer agora?"
+        else:
+            exemplo = f"Ola, eu sou {assistant_name}. O que gostaria de fazer agora?"
 
-        print(f"[VoiceWS] Enviando trigger: {trigger}")
+        trigger = (
+            f"Cumprimente o usuario em UMA frase curta e pare de falar. "
+            f'Diga exatamente isto: "{exemplo}" '
+            "PROIBIDO (nao faca nada disto): falar sobre o sistema, sobre suas "
+            "ferramentas, funcionalidades, capacidades, integracoes, status, "
+            "versao, horario, data ou clima. Nao faca listas. Nao se explique. "
+            "Nao pergunte o que ele precisa em detalhes. No maximo 15 palavras."
+        )
+
+        print(f"[VoiceWS] Enviando saudacao curta para '{user_name or '(sem nome)'}'")
         self._turn_done_event.clear()
         try:
             await self.session.send_client_content(
@@ -1731,6 +1761,59 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
         if response.server_content:
             sc = response.server_content
 
+            # ── Transcricao do USUARIO vem antes do portao de interrupcao ────
+            #
+            # BUG CORRIGIDO: o bloco de `_interrupted` logo abaixo faz `return`,
+            # e a transcricao do usuario era tratada DEPOIS dele. Consequencia:
+            # exatamente quando o usuario interrompia para falar, a fala dele
+            # NAO aparecia no chat — o momento em que a transcricao mais importa.
+            # O portao de interrupcao existe para calar a SAIDA do Charon, nao
+            # para cegar a entrada do usuario.
+            if sc.input_transcription and sc.input_transcription.text:
+                try:
+                    await self.ws.send_json({
+                        "type": "transcript",
+                        "speaker": "user",
+                        "text": sc.input_transcription.text,
+                    })
+                except Exception:
+                    pass
+
+            # ── BARGE-IN (o usuario falou por cima do Charon) ───────────────
+            #
+            # O Gemini Live faz deteccao de voz no servidor. Quando ele percebe
+            # que o usuario comecou a falar no meio da resposta, marca
+            # `sc.interrupted = True` e PARA de gerar aquele turno.
+            #
+            # BUG CORRIGIDO: este campo era IGNORADO. O backend continuava
+            # repassando o audio ja gerado e nunca avisava o navegador — entao o
+            # Charon nao parava de falar para ouvir o usuario (exatamente o que
+            # foi relatado). Agora:
+            #   1. marcamos a sessao como interrompida (descarta audio restante);
+            #   2. avisamos o frontend para ESVAZIAR o buffer de reproducao, que
+            #      e o que realmente silencia o Charon na hora (havia segundos de
+            #      audio ja baixado esperando na fila do navegador);
+            #   3. liberamos quem estiver esperando o turno terminar.
+            if getattr(sc, "interrupted", False) and not self._interrupted:
+                self._interrupted = True
+                self._interrupted_at = asyncio.get_event_loop().time()
+                self._audio_buffer = []
+                self._turn_done_event.set()
+                print("[VoiceWS] BARGE-IN: usuario falou por cima — Charon vai calar")
+                try:
+                    await self.ws.send_json({"type": "interrupted", "reason": "usuario_falou"})
+                except Exception:
+                    pass
+
+            # Rede de seguranca: se ficarmos "interrompidos" por muito tempo sem
+            # receber turn_complete, liberamos. Sem isto, uma interrupcao sem
+            # fecho deixaria o Charon surdo permanentemente.
+            if self._interrupted and self._interrupted_at:
+                if (asyncio.get_event_loop().time() - self._interrupted_at) > 3.0:
+                    print("[VoiceWS] Interrupcao expirou sem turn_complete — religando o audio")
+                    self._interrupted = False
+                    self._interrupted_at = 0.0
+
             # Skip OLD transcriptions (user already speaking new message)
             # but KEEP turn_complete to reset state and flush audio
             if self._interrupted:
@@ -1744,6 +1827,7 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
                         except Exception:
                             pass
                     self._interrupted = False
+                    self._interrupted_at = 0.0
                     self._turn_done_event.set()
                     try:
                         await self.ws.send_json({"type": "turn_complete"})
@@ -1753,15 +1837,7 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
                     self._audio_buffer = []
                 return
 
-            if sc.input_transcription and sc.input_transcription.text:
-                try:
-                    await self.ws.send_json({
-                        "type": "transcript",
-                        "speaker": "user",
-                        "text": sc.input_transcription.text,
-                    })
-                except Exception:
-                    pass
+            # (a transcricao do usuario ja foi tratada ANTES do portao acima)
             if sc.output_transcription and sc.output_transcription.text:
                 try:
                     await self.ws.send_json({
@@ -2108,7 +2184,19 @@ async def voice_websocket(ws: WebSocket):
 
             if "bytes" in msg and msg["bytes"]:
                 if session._running and session.session:
-                    session._interrupted = False
+                    # NAO resetar session._interrupted aqui.
+                    #
+                    # BUG CORRIGIDO: esta linha fazia `_interrupted = False` a
+                    # CADA chunk do microfone. Como o mic envia audio sem parar
+                    # (a cada ~20-60ms), a interrupcao era desfeita no chunk
+                    # seguinte — o audio antigo do Gemini voltava a ser
+                    # repassado e o Charon nunca parava de falar. Era uma das
+                    # causas de "nao consigo interromper o Charon".
+                    #
+                    # Quem libera a interrupcao agora e o `turn_complete` do
+                    # turno interrompido (ou o guarda de 3s em _handle_response).
+                    # O audio do usuario continua sendo enviado normalmente, para
+                    # o Gemini ouvir a fala nova.
                     await session.send_audio(msg["bytes"])
                 else:
                     _audio_buffer.append(msg["bytes"])
@@ -2175,16 +2263,27 @@ async def voice_websocket(ws: WebSocket):
                     break
 
                 elif msg_type == "interrupt":
+                    # Pedido de interrupcao vindo do NAVEGADOR.
+                    #
+                    # O frontend detecta que o usuario comecou a falar (pelo
+                    # nivel do microfone) e manda isto. Serve para calar o
+                    # Charon ANTES do VAD do servidor reagir — a latencia do
+                    # Gemini sozinha ja deixava o Charon falando por cima.
                     session._interrupted = True
+                    session._interrupted_at = asyncio.get_event_loop().time()
+                    session._audio_buffer = []
                     if session.session and session._running:
                         try:
+                            # O `interrupt=True` avisa o proprio Gemini para
+                            # abandonar a geracao do turno atual.
                             await session.session.send_realtime_input(
                                 audio={"data": b"", "mime_type": "audio/pcm;rate=16000"},
                                 interrupt=True,
                             )
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            print(f"[VoiceWS] Falha ao enviar interrupt ao Gemini (ignorado): {e}")
                     session._turn_done_event.set()
+                    print("[VoiceWS] Interrupcao pedida pelo cliente")
 
     except WebSocketDisconnect:
         pass

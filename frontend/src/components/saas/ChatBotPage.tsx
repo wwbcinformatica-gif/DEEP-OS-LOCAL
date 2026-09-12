@@ -36,10 +36,12 @@ export default function ChatBotPage() {
   const [config, setConfig] = useState<ChatBotConfig>({
     provider: 'ollama',
     ollama_url: 'http://localhost:11434',
-    ollama_model: 'llama3',
-    gemini_model: 'gemini-2.0-flash',
+    // Defaults corrigidos: 'llama3' e 'gemini-2.0-flash' nao existem mais
+    // (o segundo foi removido pela API do Google). Ver tools/MODELOS-PROVADOS.md.
+    ollama_model: 'qwen2.5-coder:7b',
+    gemini_model: 'gemini-2.5-flash',
     gemini_api_key: '',
-    openai_model: 'gpt-4o',
+    openai_model: 'gpt-4o-mini',
     openai_api_key: '',
     assistant_name: 'Assistente',
     assistant_personality: 'Voce e um assistente util e educado.',

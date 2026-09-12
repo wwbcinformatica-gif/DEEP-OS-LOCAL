@@ -1,13 +1,384 @@
 # DEEP-OS — Status do Projeto
 
-**Ultima atualizacao:** 2026-09-11 (Sessao 48) — Correcoes de isolamento, lembretes, audio e microfone
+**Ultima atualizacao:** 2026-09-12 (Sessao 49) — Chaves de API, modelos 404, Charon (barge-in + saudacao) e provedores personalizados
 
 **Commit em producao:** `1c6acbf` | **Backend:** `deepos-backend.service` (active) | **Site:** https://deep-os.tech
 
 **Leia primeiro:** [`memory.md`](memory.md) (regras e armadilhas do projeto),
+[`docs/PROVEDORES.md`](docs/PROVEDORES.md) (provedores comuns e como criar os seus),
+[`docs/MODELOS.md`](docs/MODELOS.md) (por que os modelos davam 404 e como testar),
 [`docs/CHARON-VOZ.md`](docs/CHARON-VOZ.md) (arquitetura da voz — a parte mais
 complexa do sistema) e [`RECUPERAR-VPS.md`](RECUPERAR-VPS.md) (procedimento de
 emergencia do servidor).
+
+---
+
+## Sessao 2026-09-12 (49) — Chaves de API, modelos que davam 404 e Charon
+
+### Resumo
+Três queixas do usuário, todas com causa real — e **cada uma com bugs somados**
+em que um escondia o outro:
+
+1. *"ao trocar a chave api de um dos provedores não estava alterando o `.env`"*
+2. *"quase todos os modelos davam erro 404 e, quando eu selecionava o provedor,
+   não carregava todos de cada provedor"*
+3. *"o Charon não para o que está falando para ouvir o usuário"* + *"a saudação
+   inicial fala muita coisa sobre o sistema"*
+
+Resultado: 9 correções de código, 3 testes novos (15 arquivos na suíte, todos
+passando) e 6 ferramentas de diagnóstico em `tools/`. Além disso, descobrimos que
+**5 das suas chaves/contas precisam de ação** — não é bug do código (seção 5).
+
+---
+
+### 1. Bug da chave de API — causa raiz
+
+**Sintoma:** trocar a chave de um provedor não mudava o `backend/.env`.
+
+Eram **dois** problemas, e o segundo escondia o primeiro.
+
+**(a) O placeholder sobrescrevia a chave real.**
+O `JarvisPage.tsx` marcava as chaves já salvas com o texto literal
+`'***saved***'` no estado **e no `localStorage`**, e o botão Salvar montava o
+payload com **todos** os provedores. Ao salvar a chave de um, o marcador dos
+outros ia junto — e o backend gravava `'***saved***'` no `.env`, **destruindo a
+chave verdadeira**. A tela dizia "salvo" e a chave parava de funcionar.
+
+**(b) O erro era engolido — e o 401 também.**
+As rotas `/api/config*` são protegidas pelo middleware `ProtecaoSensiveis`, que
+libera apenas quando o header `Host` é local:
+
+| Ambiente | Host | Resultado |
+|----------|------|-----------|
+| Local (`start-saas.bat`) | `localhost` | liberado — **por isso o teste local nunca mostrou o erro** |
+| Produção (`deep-os.tech` via nginx) | externo | exige JWT |
+
+As chamadas não mandavam `Authorization` → **401 na VPS**. E o
+`.catch(() => {})` engolia, deixando a tela dizer *"chave salva no servidor"* sem
+ter salvado nada.
+
+**Correção:**
+- `SENTINELA_CHAVE_SALVA` + `ehSentinela()`; o marcador **não vai mais** para o
+  `localStorage`; Salvar envia **só** o provedor ativo; guarda que recusa enviar
+  o marcador.
+- Novo helper `authHeaders()` com o JWT em todas as chamadas de `/api/config*`
+  e `/api/instances`.
+- Fim do `.catch(() => {})`: agora o usuário vê o motivo real (`401 → "sessão
+  expirada"`, `recusados` do backend, etc.).
+- **Defesa em profundidade no backend:** `_PLACEHOLDERS_INVALIDOS` +
+  `_chave_valida()`. `PUT /api-key` recusa com **HTTP 400**; `PUT /api-keys`
+  ignora os inválidos e devolve `recusados` + `aviso`.
+
+**Detalhe que quase passou:** o `raise HTTPException(400)` estava **dentro** do
+`try/except Exception`, então viraria **500** — escondendo a causa. Corrigido com
+`except HTTPException: raise`.
+
+**Teste:** `tests-manual/test_api_keys.py` — 32 verificações, incluindo o cenário
+exato do bug (salvar Groq sem destruir Gemini/OpenRouter), a checagem de que o
+`.env` não recebe o marcador, e chamadas aos **endpoints reais** confirmando que
+o 400 não vira 500. Faz backup/restore do `.env` e confirma que as chaves do
+usuário ficaram intactas.
+
+---
+
+### 2. Bug dos modelos — quatro problemas somados
+
+**(a) IDs extintos.** 9+ confirmados, ex.: `llama-3.3-70b-versatile` e
+`llama-3.1-8b-instant` (sumiram da Groq), `gemini-1.5-*` e `gemini-2.0-flash`
+(removidos pelo Google), `anthropic/claude-3.5-sonnet` (OpenRouter),
+`minimaxai/minimax-m2.7` (nunca existiu na Groq).
+
+**(b) Listas divergentes.** `constants.ts` usava `nvidia/llama-...` e
+`JarvisPage.tsx` usava sem prefixo. Como o prefixo **é obrigatório** (seção 4),
+um dos dois estava necessariamente quebrado.
+
+**(c) `zhipu` invisível.** Tinha lista de modelos em `MODELS` mas **não estava**
+no array `PROVIDERS` — o provedor nunca aparecia no seletor.
+
+**(d) Lista dinâmica sem cancelamento.** Ao trocar de Ollama para Groq, a
+requisição do Ollama continuava em voo e, ao responder, **sobrescrevia** a lista
+do Groq. O seletor mostrava os modelos do provedor errado → 404. Também havia o
+`dynamicModels.length > 0 ? dynamicModels : provider.models`, que dava prioridade
+à lista dinâmica mesmo com outro provedor selecionado.
+
+**Correção:**
+- Listas reescritas **só com modelos provados** por chamada real.
+- `authHeaders()` + guarda de cancelamento (`let ativo`) no `useEffect`.
+- `modelosDisponiveis` derivado do **provedor ativo**, não do que estiver na
+  memória.
+- Trocar de provedor redefine o modelo (antes o `<select>` ficava em branco).
+- `zhipu` adicionado a `PROVIDERS`.
+- IDs extintos corrigidos **também** em `InstancesPage.tsx`, `ChatBotPage.tsx`,
+  `backend/core/config.py` (`MODEL_ROUTING.analysis`) e
+  `backend/routes/chatbot.py` (defaults).
+
+**Teste:** `tests-manual/test_model_lists.py` — offline, garante coerência entre
+os arquivos, ausência dos 41 IDs extintos conhecidos e o prefixo obrigatório da
+NVIDIA.
+
+> **Nota sobre o teste:** ele acusou dois falsos positivos no começo (parseava os
+> modelos do provedor seguinte quando a lista era vazia, e lia as próprias
+> mensagens de comentário como se fossem código). O teste foi corrigido — vale
+> registrar porque "o teste falhou" nem sempre significa "o código está errado".
+
+---
+
+### 3. A armadilha central: `/models` MENTE
+
+A descoberta mais importante da sessão:
+
+**OpenRouter** — `/api/v1/models` é **público**:
+```
+GET /api/v1/models com chave FALSA -> HTTP 200 (445 modelos)
+GET /api/v1/key   com a chave real -> HTTP 401 "User not found."
+```
+A chave estava inválida e a lista continuava respondendo. Comparar IDs com o
+`/models` "passava".
+
+**NVIDIA** — lista modelos que a conta **não tem**:
+```
+/v1/models       -> lista nvidia/llama-3.1-nemotron-70b-instruct
+chat/completions -> HTTP 404 "Function '9b96341b-...': Not found for account"
+```
+
+**Regra adotada:** só vale o que responde **HTTP 200 com texto de verdade**, e
+todo teste inclui um **controle negativo** (modelo inexistente) — se ele passar,
+o endpoint não é confiável (ver `tools/validar-opencode-real.cjs` e a pegadinha
+do `api.opencode.ai`, que devolvia `200` com o corpo `Not Found` para **qualquer**
+modelo, inclusive inexistente).
+
+---
+
+### 4. Correção de um commit anterior errado (prefixo NVIDIA)
+
+O commit `a8527c4` ("remove nvidia/ prefix from NVIDIA model IDs") **estava
+errado**. Medido com chamada real:
+```
+nvidia/nemotron-3-super-120b-a12b -> HTTP 200
+nemotron-3-super-120b-a12b        -> HTTP 404
+```
+O prefixo faz parte do ID. Restaurado e revalidado modelo por modelo.
+
+---
+
+### 5. ⚠️ Chaves/contas que precisam da sua ação (NÃO é bug de código)
+
+| Provedor | Resposta | Significado | Ação |
+|----------|----------|-------------|------|
+| **OpenRouter** | `401 User not found.` | chave inválida/revogada | gerar nova em <https://openrouter.ai/keys> |
+| **OpenAI** | `401 Incorrect API key` | chave inválida | gerar nova em <https://platform.openai.com/api-keys> |
+| **Zhipu (GLM)** | `429 余额不足或无可用资源包,请充值。` | *saldo insuficiente* | recarregar em <https://open.bigmodel.cn> |
+| **MiMo** | `402 Insufficient account balance` | sem saldo | recarregar, ou usar `mimo.exe` local |
+| **OpenCode** | `401 Insufficient balance` | sem saldo (endpoint correto) | recarregar em <https://opencode.ai/workspace> |
+| **OpenClaude** | — | aponta para servidor **local** (`localhost:4000`) | rodar o servidor local |
+
+**Funcionando:** Groq (7/7 modelos), Gemini (7), NVIDIA (8), Ollama local.
+**Chaves válidas:** Groq ✅, Gemini ✅, NVIDIA ✅.
+
+---
+
+### 6. Ferramentas criadas em `tools/`
+
+| Arquivo | Função |
+|---------|--------|
+| `diagnostico-chaves.cjs` | diz se cada chave é válida (endpoints próprios para validar credencial) |
+| `provar-modelos.cjs` | prova cada modelo com chamada real → gera `modelos-provados.json` e `MODELOS-PROVADOS.md` |
+| `modelos-atuais.cjs` | baixa as listas reais e compara com os IDs do código |
+| `reteste-rede.cjs` | retesta o que falhou por rede (não confundir "servidor caiu" com "modelo não existe") |
+| `validar-opencode-real.cjs` | confere se um endpoint responde de verdade (pega o `200 Not Found`) |
+| `teste-nvidia-id.cjs` | prova que o prefixo da NVIDIA é obrigatório |
+
+**Pegadinha de URL documentada:** Groq usa `/openai/v1`, OpenRouter usa `/api/v1`,
+Zhipu usa `/api/paas/v4`. Errar isso produziu **uma sessão inteira de falsos
+404** na primeira versão do script.
+
+---
+
+### 7. Charon: interrupção (barge-in) e saudação curta
+Duas queixas do usuário sobre a voz:
+
+**(a) "o Charon deve parar o que está falando para ouvir o usuário, depois
+continua — essa função não está funcionando."**
+Estava quebrada por **três motivos somados**:
+
+1. **O backend ignorava `server_content.interrupted`** — o sinal do VAD do Gemini
+   avisando "o usuário falou por cima". O áudio antigo continuava sendo repassado
+   e o navegador nunca era avisado.
+2. **Cada chunk do microfone fazia `_interrupted = False`.** Como o mic envia
+   áudio a cada ~20–60 ms, a interrupção era desfeita no chunk seguinte. Era o
+   bug mais grave e o mais difícil de ver — a linha parecia correta isolada.
+3. **O frontend nunca enviava `type: 'interrupt'`** — o handler do backend era
+   **código morto**. E não esvaziava a fila local: mesmo com o servidor calado,
+   havia **segundos** de fala já baixada tocando no navegador. É isso que se
+   percebe como "o Charon não para de falar".
+
+**Correção em duas frentes:**
+
+| Frente | Detecção | Ação |
+|--------|----------|------|
+| Navegador | nível do mic (`>0.06` por 3 chunks seguidos) | esvazia fila + ring, descarta áudio em trânsito por 400 ms, envia `interrupt` |
+| Servidor | VAD do Gemini (`sc.interrupted`) | marca `_interrupted`, descarta a saída, envia `{"type":"interrupted"}` |
+
+Quem libera a interrupção agora é o `turn_complete`, com **rede de segurança de
+3 s** (`_interrupted_at`) para o Charon nunca ficar surdo para sempre.
+
+**Bug extra que o teste comportamental revelou:** o `return` do portão de
+interrupção vinha **antes** do tratamento de `input_transcription` — então **a
+fala do usuário não era transcrita justamente quando ele interrompia**, que é o
+momento em que a transcrição mais importa. Corrigido: a interrupção cala a
+**saída**, não pode cegar a **entrada**.
+
+**(b) "a saudação inicial fala muita coisa sobre o sistema; quero breve, tipo
+'Ola Wilson eu sou Charon o que gostaria de fazer agora'."**
+O gatilho era um convite aberto: `"Se apresente para {nome} agora. Diga seu
+nome, horario e como pode ajudar."` O Gemini Live obedecia discursando sobre o
+sistema, ferramentas, funcionalidades e horário.
+
+Agora o gatilho informa o **texto exato** e lista o que é **proibido** (sistema,
+ferramentas, funcionalidades, status, horário/data/clima, listas), com limite de
+15 palavras. Modelos de áudio tendem a "encher linguiça" quando a instrução deixa
+margem — por isso as proibições pesam tanto quanto o pedido.
+
+**Teste:** `tests-manual/test_charon_barge_in.py` (novo) — 30 verificações,
+incluindo um **cenário comportamental** que instancia `VoiceSession`, injeta
+respostas falsas do Gemini e confere: áudio descartado após interrupção,
+transcrição do usuário preservada, liberação no `turn_complete`, e a rede de
+segurança de 3 s. Foi esse cenário que achou o bug da transcrição — a análise
+estática não pegava.
+
+**Documentação:** `docs/CHARON-VOZ.md` seções 7.3 e 7.3.1 reescritas.
+
+---
+
+### 8. Não havia onde colar a chave da OpenAI + provedores personalizados
+
+**Queixa:** *"no projeto não tem onde inserir a chave do provedor openai"*.
+**Estava certo** — e o mesmo valia para `opencode` e `openclaude`.
+
+**Causa:** o modal de chaves é montado a partir de `PROVIDERS`
+(`PROVIDERS.filter(p => !p.dynamic)`). Esses três **não estavam na lista**, então
+nenhum campo era renderizado. Agravante: **todo o resto do sistema já os
+suportava** — `get_client`, o `key_map` do backend, a carga de chaves e o mapa de
+envio. Faltava só a interface.
+
+**Pedido seguinte:** *"pode inserir outros provedores ou uma opção para que eu
+crie provedores novos, pois sempre tem provedores novos; já deixa no projeto os
+mais comuns incluso"*.
+
+**Solução — registro de provedores** (`backend/core/provedores.py`):
+
+| Parte | Conteúdo |
+|-------|----------|
+| `PRESETS` | 25 provedores comuns (no código, estáveis) |
+| `provedores_custom.json` | criados pelo usuário (fora do git) |
+| `GET/POST/DELETE /api/config/provedores` | CRUD |
+| `POST /api/config/provedores/modelos` | busca a lista de modelos do provedor |
+
+Agora **a interface não tem lista própria para os campos de chave** — usa a do
+backend. Um provedor novo aparece sozinho, sem alterar o frontend.
+`get_client` e o salvamento de chave consultam o registro, então **criar provedor
+não exige código nem deploy**.
+
+**Provedores comuns adicionados:** DeepSeek, xAI (Grok), Mistral, Anthropic,
+Together, Fireworks, Cerebras, Perplexity, DeepInfra, Hyperbolic + servidores
+locais LM Studio, vLLM, text-generation-webui e Jan.
+
+**Na interface:** botões **Salvar**, **Modelos** (carrega a lista do provedor),
+**Testar** (chamada real) e **X** (remover, só nos personalizados), mais
+**+ Adicionar provedor**.
+
+**Cuidado documentado:** o botão **Modelos** usa `/models`, que **mente** no
+OpenRouter (público) e na NVIDIA (lista o que a conta não tem). Por isso ele
+marca `confiavel: False` nesses dois e avisa na tela — quem prova o modelo é o
+**Testar**.
+
+**Dois bugs da mesma família, encontrados ao revisar a própria correção** — o
+mapa fixo de chaves continuava sendo a fonte, então um provedor novo não
+funcionava de ponta a ponta:
+
+| Onde | Bug | Efeito |
+|------|-----|--------|
+| Salvar (frontend) | `envKeyMap[prov.keyField]` era `undefined` para provedor novo | clicar em Salvar **não enviava nada** — chave descartada em silêncio |
+| Ler (frontend) | `envToField` era fixo | campo aparecia **vazio** com a chave já gravada; o usuário salvava de novo achando que perdeu |
+| Ler (backend) | `GET /api-keys` montava resultado de mapa fixo | nem reportava os provedores novos |
+
+Corrigido com o padrão `<ID>_API_KEY` (o mesmo que o backend usa) e iterando as
+chaves da resposta em vez de um mapa fixo. `GET /api-keys` passou de **9 para 25**
+provedores reportados.
+
+`docs/PROVEDORES.md` (novo) documenta tudo. Teste: `test_provedores.py`
+(75 verificações, incluindo criar provedor → `get_client` aceitar → remover, e
+executar `GET /api/config/api-keys` de verdade).
+
+---
+
+### 9. Documentação
+
+- **Novo:** [`docs/MODELOS.md`](docs/MODELOS.md) — por que davam 404, as
+  armadilhas de teste, o estado real de cada provedor, as 8 regras para não
+  repetir, e os comandos rápidos.
+- **Novo:** [`docs/PROVEDORES.md`](docs/PROVEDORES.md) — catálogo de provedores,
+  como criar um novo pela interface, e as armadilhas registradas.
+- **Atualizado:** `docs/CHARON-VOZ.md` (barge-in + saudação), este `STATUS.md` e
+  `memory.md` (regras novas).
+
+---
+
+### 10. Commits desta sessão
+
+| Commit | Assunto |
+|--------|---------|
+| `436673e` | `fix(chaves)`: placeholder `***saved***` não sobrescreve mais a chave real |
+| `b09cdec` | `fix(modelos)`: listas provadas, seletor de provedor e IDs extintos |
+| (este) | `fix(charon)+feat(provedores)`: barge-in, saudação curta, campos de chave e provedores personalizados |
+
+---
+
+### 11. Verificações executadas
+
+- `tests-manual/run_all.py` → **16/16 arquivos passando**
+- `tsc --noEmit` → **0 erros novos** nos arquivos alterados (14 erros pré-existentes em outros)
+- `import main` → OK, **250 rotas**
+- Chaves reais do usuário **intactas** após os testes (9 provedores no `.env`)
+- Barge-in validado por cenário **comportamental** (não só análise de texto)
+- **Deploy verificado com `tools/verificar-deploy.cjs`** — baixa o JavaScript
+  publicado e confirma que o código novo está no ar (o "HTTP 200" do script de
+  deploy **não** provava isso: bundle antigo em cache também responde 200, e
+  `/api/config/*` devolve 401 existindo ou não a rota)
+
+---
+
+### 12. ✅ Confirmado pelo usuário em produção (2026-09-12)
+
+> *"perfeito salvou a chave testou ok funcionou no chat jarvis"*
+
+O fluxo completo de chave passou a funcionar de ponta a ponta:
+**abrir o campo → colar → Salvar → Testar → conversar no Jarvis**.
+
+Antes desta sessão esse caminho era impossível: o campo da OpenAI **não
+existia**, o placeholder `***saved***` sobrescrevia a chave real, o erro era
+engolido por `.catch(() => {})` e na VPS o `401` do middleware ficava invisível.
+
+**Ainda não testado com voz real** (precisa de microfone): a interrupção do
+Charon e a saudação curta. Ver a seção 12 da sessão 49 mais abaixo para o roteiro.
+
+---
+
+### 11. ⚠️ Não testado (depende de você, precisa de voz)
+
+O barge-in e a saudação usam o Gemini Live, então **não dá para verificar sem
+microfone**. Depois do deploy, confira na tela do Charon:
+
+1. A saudação inicial deve ser **curta**: "Olá Wilson, eu sou Charon. O que
+   gostaria de fazer agora?" — sem discurso sobre o sistema.
+2. Peça algo longo ("me explique o projeto inteiro") e **fale por cima no meio**.
+   O Charon deve **calar na hora** e a sua fala deve aparecer no chat.
+3. Depois de você parar, ele deve **retomar** e responder o que você pediu.
+
+Se o Charon não calar, o ponto mais provável é o **limite de sensibilidade** do
+microfone (`nivel > 0.06` por 3 chunks, em `CharonPage.tsx`): microfone baixo ou
+com muito ruído de fundo pode não atingir o limite. Ajuste esse número — é o
+único parâmetro que precisa de calibração com o seu equipamento.
 
 ---
 

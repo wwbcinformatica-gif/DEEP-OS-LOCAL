@@ -206,6 +206,59 @@ resolvidas por `_resolve_voice()` **case-insensitive**.
 cima. No `turn_complete` com interrupcao, o buffer restante e **despejado**
 (flush) antes de fechar — senao o fim da fala se perde.
 
+**Corrigido em 2026-09-12 (Sessao 49).** A interrupcao NAO funcionava, por tres
+motivos somados — e o usuario relatou exatamente isso:
+
+1. **O backend ignorava `server_content.interrupted`** — o sinal do VAD do
+   Gemini avisando "o usuario falou por cima". O audio antigo continuava a ser
+   repassado e o navegador nunca era avisado.
+2. **Cada chunk do microfone fazia `_interrupted = False`.** Como o mic envia
+   audio a cada ~20-60 ms, qualquer interrupcao era desfeita no chunk seguinte.
+   Este era o bug mais grave e o mais dificil de enxergar — a linha parecia
+   correta isolada. **Quem libera a interrupcao agora e o `turn_complete`** do
+   turno interrompido, com uma **rede de seguranca de 3 s** (`_interrupted_at`)
+   para o Charon nunca ficar surdo para sempre.
+3. **O frontend nunca enviava `type: 'interrupt'`** — o handler do backend era
+   codigo morto. E nao esvaziava a **fila local** (`audioBufRef` + o ring do
+   worklet): mesmo com o servidor calado, havia **segundos** de fala ja baixada
+   tocando no navegador. E isso que se percebe como "o Charon nao para de falar".
+
+Fluxo correto agora, em duas frentes:
+
+| Frente | Quem detecta | O que faz |
+|--------|--------------|-----------|
+| Navegador | nivel do microfone (`>0.06` por 3 chunks seguidos) | esvazia a fila + o ring, descarta audio em transito por 400 ms, envia `interrupt` |
+| Servidor | VAD do Gemini (`sc.interrupted`) | marca `_interrupted`, descarta a saida, envia `{"type": "interrupted"}` ao navegador |
+
+A deteccao no navegador existe porque a latencia do VAD do servidor sozinha ja
+deixava o Charon falando por cima do usuario. O limite de 3 chunks evita que um
+estalo, o teclado ou a propria voz do Charon no alto-falante interrompam a fala.
+
+**Detalhe que o teste comportamental revelou:** o `return` do portao de
+interrupcao vinha ANTES do tratamento de `input_transcription`, entao **a fala do
+usuario nao era transcrita justamente quando ele interrompia** — o momento em que
+a transcricao mais importa. A transcricao do usuario agora e tratada antes do
+portao: a interrupcao cala a **saida**, nao pode cegar a **entrada**.
+
+### 7.3.1 Saudacao inicial
+O gatilho de `_send_startup_briefing()` precisa impor brevidade **e proibir
+explicitamente** os assuntos que faziam a fala se estender.
+
+O gatilho antigo era um convite aberto:
+`"Se apresente para {user_name} agora. Diga seu nome, horario e como pode ajudar."`
+— e o Gemini Live respondia com uma introducao longa: o que e o sistema, quais
+ferramentas tem, o que sabe fazer, o horario.
+
+Agora o gatilho informa o **texto exato** e lista o que e proibido (sistema,
+ferramentas, funcionalidades, status, horario/data/clima, listas), com limite de
+15 palavras:
+
+> "Ola Wilson, eu sou Charon. O que gostaria de fazer agora?"
+
+Modelos de audio tendem a "encher linguica" quando a instrucao deixa margem —
+por isso as proibicoes pesam tanto quanto o pedido. Coberto por
+`tests-manual/test_charon_barge_in.py`.
+
 ### 7.4 Tools
 - `BASIC_TOOL_DECLARATIONS` (18) → `MEDIUM_TOOL_DECLARATIONS` (19) →
   `EXTRA_TOOL_DECLARATIONS` (8, so no toolset `full`) = **26 unicas**

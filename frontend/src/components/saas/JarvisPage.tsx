@@ -1,10 +1,47 @@
-﻿import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   Conversation, TranscriptEntry,
   getConversations, createConversation, renameConversation, deleteConversation,
   getTranscripts, saveTranscripts, getActivityLog, saveActivityLog,
   tenantGet, tenantSet,
 } from './chatStorage';
+
+/**
+ * Marcador visual de "chave ja salva no servidor".
+ *
+ * A chave real NUNCA e enviada ao navegador (o backend so devolve `has_key`).
+ * Este texto ocupa o campo do formulario para o usuario saber que existe algo
+ * salvo — mas ele NAO e a chave e NUNCA deve ser enviado de volta.
+ *
+ * BUG CORRIGIDO: antes o valor literal '***saved***' era gravado no estado E no
+ * localStorage, e o botao Salvar montava o payload com TODOS os providers. Ao
+ * salvar a chave de um provider, o marcador dos outros ia junto e o backend
+ * gravava '***saved***' no `.env`, SOBRESCREVENDO a chave verdadeira.
+ */
+const SENTINELA_CHAVE_SALVA = '***saved***';
+
+/** True se o valor e o marcador (nao uma chave real do usuario). */
+const ehSentinela = (v: string | undefined): boolean => v === SENTINELA_CHAVE_SALVA;
+
+/**
+ * Headers de autenticacao para as rotas protegidas de /api/config.
+ *
+ * SEGUNDO BUG DO MESMO SINTOMA ("troco a chave e o .env nao muda"):
+ * o backend protege /api/config* pelo middleware `ProtecaoSensiveis`, que
+ * libera apenas quando o header `Host` e local (127.0.0.1/localhost).
+ *
+ * - Local (start-saas.bat) -> Host local -> liberado, entao a falta do header
+ *   nunca aparecia nos testes do usuario.
+ * - Producao (deep-os.tech via nginx) -> Host externo -> exige JWT.
+ *
+ * Como as chamadas nao mandavam `Authorization`, na VPS elas voltavam 401; e
+ * como o erro era engolido por `.catch(() => {})`, a tela dizia com tranquilidade
+ * "chave salva no servidor" sem ter salvo nada.
+ */
+const authHeaders = (extra: Record<string, string> = {}): Record<string, string> => {
+  const t = tenantGet('saas_token') || localStorage.getItem('saas_token') || '';
+  return t ? { ...extra, Authorization: `Bearer ${t}` } : extra;
+};
 
 interface ToolCall {
   name: string;
@@ -52,57 +89,135 @@ const BROWSER_VOICE_MAP: Record<string, string[]> = {
   daniel: ['daniel', 'pt'],
 };
 
+/**
+ * Listas de modelos por provider.
+ *
+ * REGRA (aprendida do jeito dificil): so entra aqui modelo que respondeu
+ * HTTP 200 numa chamada de chat REAL, testada por `tools/provar-modelos.cjs`.
+ *
+ * Por que nao basta copiar do endpoint /models de cada provider:
+ *   - OpenRouter /api/v1/models e PUBLICO: devolve 445 modelos mesmo com uma
+ *     chave FALSA. Nunca prova que a chave funciona.
+ *   - NVIDIA /v1/models lista modelos que a conta NAO tem habilitados: eles
+ *     aparecem na lista e devolvem 404 "Not found for account" na chamada.
+ *   - A lista antiga tinha 9 IDs extintos (llama-3.3-70b-versatile na Groq,
+ *     gemini-1.5-*, anthropic/claude-3.5-sonnet...) — escolher um deles dava
+ *     404 sem explicacao.
+ *
+ * Ver `tools/MODELOS-PROVADOS.md` para o resultado da ultima sondagem.
+ */
 const PROVIDERS = [
   { id: 'ollama', label: 'Ollama (local)', keyField: '', models: [], dynamic: true },
   { id: 'llamacpp', label: 'llama.cpp (GGUF local)', keyField: '', models: [], dynamic: true },
   { id: 'gemini', label: 'Google Gemini', keyField: 'gemini', models: [
     { id: 'gemini-3.6-flash', label: 'Gemini 3.6 Flash' },
-    { id: 'gemini-2.5-flash-preview-04-17', label: 'Gemini 2.5 Flash Preview' },
-    { id: 'gemini-2.5-pro-preview-05-06', label: 'Gemini 2.5 Pro Preview' },
-    { id: 'gemini-1.5-flash-latest', label: 'Gemini 1.5 Flash' },
-    { id: 'gemini-1.5-pro-latest', label: 'Gemini 1.5 Pro' },
+    { id: 'gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'gemini-3.5-flash-lite', label: 'Gemini 3.5 Flash Lite (economico)' },
+    { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash (preview)' },
+    { id: 'gemini-flash-latest', label: 'Gemini Flash (ultima versao)' },
+    { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { id: 'gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
+    { id: 'gemini-3.1-pro-preview', label: 'Gemini 3.1 Pro (exige plano pago)' },
   ]},
   { id: 'openrouter', label: 'OpenRouter (gratis/variados)', keyField: 'openrouter', models: [
+    // ATENCAO: a chave OpenRouter atual foi recusada com 401 "User not found"
+    // (ver tools/diagnostico-chaves.cjs). Estes IDs existem no catalogo, mas
+    // so funcionam depois de gerar uma chave nova em openrouter.ai/keys.
     { id: 'openrouter/auto', label: 'Auto (melhor modelo)' },
-    { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (gratis)' },
-    { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (gratis)' },
-    { id: 'meta-llama/llama-3.1-70b-instruct:free', label: 'Llama 3.1 70B (gratis)' },
-    { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash (gratis)' },
-    { id: 'google/gemma-3-27b-it:free', label: 'Gemma 3 27B (gratis)' },
-    { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+    { id: 'anthropic/claude-opus-4.6', label: 'Claude Opus 4.6' },
+    { id: 'anthropic/claude-sonnet-4.6', label: 'Claude Sonnet 4.6' },
+    { id: 'anthropic/claude-haiku-4.5', label: 'Claude Haiku 4.5 (rapido)' },
     { id: 'openai/gpt-4o', label: 'GPT-4o' },
-    { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
-    { id: 'anthropic/claude-3-haiku:free', label: 'Claude 3 Haiku (gratis)' },
-    { id: 'deepseek/deepseek-chat-v3-0324:free', label: 'DeepSeek V3 (gratis)' },
-    { id: 'qwen/qwen-2.5-72b-instruct:free', label: 'Qwen 2.5 72B (gratis)' },
-    { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (gratis)' },
-    { id: 'microsoft/phi-4-reasoning:free', label: 'Phi-4 Reasoning (gratis)' },
+    { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+    { id: 'openai/gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+    { id: 'google/gemini-3.5-flash', label: 'Gemini 3.5 Flash' },
+    { id: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+    { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { id: 'deepseek/deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+    { id: 'deepseek/deepseek-v3.2', label: 'DeepSeek V3.2' },
+    { id: 'qwen/qwen3-235b-a22b', label: 'Qwen3 235B A22B' },
+    { id: 'meta-llama/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+    { id: 'mistralai/mistral-large-2512', label: 'Mistral Large' },
+    { id: 'x-ai/grok-4.6', label: 'Grok 4.6' },
+    { id: 'google/gemma-4-31b-it:free', label: 'Gemma 4 31B (gratis)' },
+    { id: 'nvidia/nemotron-3-super-120b-a12b:free', label: 'Nemotron 3 Super 120B (gratis)' },
   ]},
   { id: 'groq', label: 'Groq (gratis/rapido)', keyField: 'groq', models: [
-    { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile' },
-    { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
+    // Os 7 abaixo foram TODOS confirmados com chamada de chat real.
+    // Saíram: llama-3.3-70b-versatile e llama-3.1-8b-instant (extintos) e
+    // minimaxai/minimax-m2.7 (nunca existiu na Groq).
     { id: 'openai/gpt-oss-120b', label: 'GPT-OSS 120B' },
-    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B (mais rapido)' },
+    { id: 'qwen/qwen3.8-27b', label: 'Qwen 3.8 27B' },
     { id: 'qwen/qwen3.6-27b', label: 'Qwen 3.6 27B' },
-    { id: 'minimaxai/minimax-m2.7', label: 'MiniMax M2.7' },
+    { id: 'groq/compound', label: 'Compound (busca web + codigo)' },
+    { id: 'groq/compound-mini', label: 'Compound Mini' },
+    { id: 'allam-2-7b', label: 'Allam 2 7B' },
   ]},
   { id: 'mimo', label: 'MiMo', keyField: 'mimo', models: [
     { id: 'mimo-v2.5', label: 'MiMo V2.5' },
   ]},
   { id: 'zhipu', label: 'Zhipu AI (GLM)', keyField: 'zhipu', models: [
-    { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash' },
+    // IDs existem no catalogo, MAS a conta esta sem saldo:
+    // HTTP 429 "余额不足或无可用资源包,请充值。" (= saldo insuficiente).
+    // Nao ha o que corrigir no codigo; precisa recarregar a conta GLM.
     { id: 'glm-5.3', label: 'GLM-5.3' },
+    { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash' },
     { id: 'glm-5.2', label: 'GLM-5.2' },
-    { id: 'glm-4-flash', label: 'GLM-4-Flash' },
-    { id: 'glm-4-plus', label: 'GLM-4-Plus' },
-    { id: 'glm-4v-flash', label: 'GLM-4V-Flash (visao)' },
+    { id: 'glm-5.1', label: 'GLM-5.1' },
+    { id: 'glm-5', label: 'GLM-5' },
+    { id: 'glm-5-turbo', label: 'GLM-5 Turbo' },
+    { id: 'glm-4.7', label: 'GLM-4.7' },
+    { id: 'glm-4.6', label: 'GLM-4.6' },
   ]},
   { id: 'nvidia', label: 'NVIDIA NIM', keyField: 'nvidia', models: [
-    { id: 'llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
-    { id: 'llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
-    { id: 'mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
-    { id: 'gemma-2-9b-it', label: 'Gemma 2 9B' },
-    { id: 'phi-3-medium-4k-instruct', label: 'Phi-3 Medium 4K' },
+    // O prefixo (nvidia/, meta/, deepseek-ai/) e OBRIGATORIO: testado, com
+    // prefixo responde 200 e sem prefixo da 404. O commit a8527c4 removeu os
+    // prefixos por engano — estes IDs foram revalidados um a um.
+    { id: 'nvidia/nemotron-3-super-120b-a12b', label: 'Nemotron 3 Super 120B' },
+    { id: 'nvidia/nemotron-3.5-lightning-30b-a3b', label: 'Nemotron 3.5 Lightning 30B' },
+    { id: 'deepseek-ai/deepseek-v4-pro-0813', label: 'DeepSeek V4 Pro' },
+    { id: 'deepseek-ai/deepseek-v4-flash-0731', label: 'DeepSeek V4 Flash' },
+    { id: 'meta/muse-glimmer-30b', label: 'Muse Glimmer 30B' },
+    { id: 'meta/llama-3.2-11b-vision-instruct', label: 'Llama 3.2 11B Vision' },
+    { id: 'z-ai/glm-5.3-flash', label: 'GLM-5.3-Flash' },
+    { id: 'openai/gpt-oss-20b', label: 'GPT-OSS 20B' },
+  ]},
+  // ─────────────────────────────────────────────────────────────────────────
+  // BUG CORRIGIDO: `openai`, `opencode` e `openclaude` FALTAVAM nesta lista.
+  //
+  // O modal "Chaves de API" monta um campo por item de PROVIDERS
+  // (`PROVIDERS.filter(p => !p.dynamic)`). Como estes tres nao estavam aqui,
+  // NAO EXISTIA campo para colar a chave deles — o usuario nao tinha onde
+  // inserir a chave da OpenAI (relatado por ele). Agravante: as chaves eram
+  // carregadas (`apiKeys`), o mapa de envio (`envKeyMap`) e o backend
+  // (`llm_native.py`) ja suportavam os tres. Faltava so a interface.
+  // ─────────────────────────────────────────────────────────────────────────
+  { id: 'openai', label: 'OpenAI', keyField: 'openai', models: [
+    { id: 'gpt-4o', label: 'GPT-4o' },
+    { id: 'gpt-4o-mini', label: 'GPT-4o Mini' },
+    { id: 'gpt-4.1', label: 'GPT-4.1' },
+    { id: 'gpt-4.1-mini', label: 'GPT-4.1 Mini' },
+    { id: 'gpt-4.1-nano', label: 'GPT-4.1 Nano (barato)' },
+  ]},
+  { id: 'openclaude', label: 'OpenClaude (servidor local)', keyField: 'openclaude', models: [
+    // Aponta para OPENCLAUDE_BASE_URL (padrao http://localhost:4000/api/v1).
+    // Nao e API na nuvem: sem o servidor local rodando, da erro de conexao.
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+  ]},
+  { id: 'opencode', label: 'OpenCode (zen)', keyField: 'opencode', models: [
+    // Catalogo real do endpoint que o backend usa (opencode.ai/zen/v1).
+    // ATENCAO: a conta esta sem saldo — todo modelo responde 401
+    // "Insufficient balance" ate recarregar em opencode.ai/workspace.
+    { id: 'deepseek-v4-flash-free', label: 'DeepSeek V4 Flash (gratis)' },
+    { id: 'nemotron-3.5-lightning-free', label: 'Nemotron 3.5 Lightning (gratis)' },
+    { id: 'mimo-v2.5-free', label: 'MiMo V2.5 (gratis)' },
+    { id: 'gpt-5.1-codex', label: 'GPT 5.1 Codex' },
+    { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+    { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
+    { id: 'glm-5.3', label: 'GLM-5.3' },
+    { id: 'kimi-k3', label: 'Kimi K3' },
   ]},
 ];
 
@@ -152,6 +267,27 @@ const JarvisPage: React.FC = () => {
   const [instanceConfig, setInstanceConfig] = useState<any>(null);
   const [dynamicModels, setDynamicModels] = useState<{id: string, label: string, hasVision?: boolean}[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
+  // Provedor cuja chave esta sendo testada agora (mostra "..." no botao).
+  const [testando, setTestando] = useState<string | null>(null);
+
+  // ── Provedores: comuns do backend + personalizados do usuario ────────────
+  //
+  // POR QUE VEM DO BACKEND
+  // Antes, os campos de chave eram montados so a partir da lista estatica deste
+  // arquivo. Foi assim que `openai`, `opencode` e `openclaude` ficaram SEM campo
+  // — o backend aceitava, mas nao havia onde colar a chave. Buscando a lista do
+  // backend (`/api/config/provedores`), um provedor novo passa a aparecer
+  // sozinho, sem alterar o frontend.
+  //
+  // A lista estatica continua sendo usada para os MODELOS dos provedores que ja
+  // foram verificados por chamada real (ver docs/MODELOS.md).
+  const [provedoresRemotos, setProvedoresRemotos] = useState<any[]>([]);
+  // Modelos descobertos em runtime pelo botao "Buscar modelos", por provedor.
+  const [modelosBuscados, setModelosBuscados] = useState<Record<string, { id: string; label: string }[]>>({});
+  const [buscandoModelos, setBuscandoModelos] = useState<string | null>(null);
+  // Formulario de provedor novo
+  const [formProvedor, setFormProvedor] = useState<{ id: string; label: string; base_url: string; api_key: string } | null>(null);
+  const [salvandoProvedor, setSalvandoProvedor] = useState(false);
   const [gpuMode, setGpuMode] = useState<Record<string, boolean>>({
     ollama: tenantGet('jarvis_gpu_ollama') !== 'false',
     llamacpp: tenantGet('jarvis_gpu_llamacpp') !== 'false',
@@ -187,19 +323,28 @@ const JarvisPage: React.FC = () => {
       if (k) keys[p] = k;
     });
     setApiKeys(keys);
-    fetch('/api/config/api-keys').then(r => r.ok ? r.json() : null).then(data => {
+    fetch('/api/config/api-keys', { headers: authHeaders() }).then(r => r.ok ? r.json() : null).then(data => {
       if (!data) return;
-      const envToField: Record<string, string> = { gemini: 'gemini', openrouter: 'openrouter', openai: 'openai', groq: 'groq', nvidia: 'nvidia', mimo: 'mimo', openclaude: 'openclaude', opencode: 'opencode', zhipu: 'zhipu' };
-      Object.entries(envToField).forEach(([name, field]) => {
-        if (data[name]?.has_key && !keys[field]) {
-          keys[field] = '***saved***';
-          tenantSet(`${field}_api_key`, '***saved***');
+      // A resposta JA vem indexada pelo NOME do provedor (o backend monta o mapa
+      // a partir do registro). Antes havia aqui um mapa fixo (`envToField`) que
+      // so conhecia os nove provedores originais — um provedor novo (DeepSeek,
+      // xAI, personalizado...) nunca recebia o marcador de "chave salva", e o
+      // campo aparecia vazio mesmo com a chave gravada no servidor.
+      Object.entries(data).forEach(([field, info]: [string, any]) => {
+        if (info?.has_key && !keys[field]) {
+          // Marcador visual: a chave EXISTE no servidor mas nao deve ser
+          // exibida. NAO e a chave real — nunca enviar isso de volta ao
+          // backend (era o bug: o payload mandava o marcador e sobrescrevia
+          // a chave verdadeira no .env).
+          keys[field] = SENTINELA_CHAVE_SALVA;
+          // NAO gravar no localStorage: se gravar, ele volta ao estado no
+          // proximo carregamento e e enviado ao servidor (mesmo problema).
         }
       });
       setApiKeys({ ...keys });
     }).catch(() => {});
     const savedInst = tenantGet('jarvis_instance_id') || '';
-    fetch('/api/instances').then(r => r.ok ? r.json() : null).then(data => {
+    fetch('/api/instances', { headers: authHeaders() }).then(r => r.ok ? r.json() : null).then(data => {
       if (data?.instances) {
         setInstances(data.instances);
         if (savedInst) {
@@ -212,6 +357,42 @@ const JarvisPage: React.FC = () => {
         }
       }
     }).catch(() => {});
+
+    // Provedores registrados no backend (comuns + personalizados do usuario).
+    // E o que garante que TODO provedor suportado tenha campo de chave: um
+    // provedor novo no backend aparece aqui sozinho, sem alterar o frontend.
+    fetch('/api/config/provedores', { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (!data) return;
+        const lista = [
+          ...(data.comuns || []),
+          ...(data.personalizados || []),
+        ];
+        setProvedoresRemotos(lista);
+        // Chaves guardadas localmente para provedores que nao estao na lista
+        // fixa acima (comuns novos e personalizados).
+        const locais: Record<string, string> = {};
+        lista.forEach((p: any) => {
+          if (!p?.id) return;
+          const k = tenantGet(`${p.id}_api_key`) || '';
+          if (k) locais[p.id] = k;
+        });
+        if (Object.keys(locais).length) {
+          setApiKeys(prev => ({ ...locais, ...prev }));
+        }
+        // Provedores personalizados com modelos ja conhecidos entram no seletor
+        const buscados: Record<string, { id: string; label: string }[]> = {};
+        (data.personalizados || []).forEach((p: any) => {
+          if (p.models?.length) buscados[p.id] = p.models;
+        });
+        if (Object.keys(buscados).length) {
+          setModelosBuscados(prev => ({ ...prev, ...buscados }));
+        }
+      })
+      .catch(() => {
+        // Sem backend acessivel, a lista estatica deste arquivo continua valendo.
+      });
 
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === 'Escape' && showSettings) setShowSettings(false);
@@ -229,9 +410,21 @@ const JarvisPage: React.FC = () => {
   }, [processLog]);
 
   useEffect(() => {
+    // Guarda de cancelamento.
+    //
+    // BUG CORRIGIDO ("selecionava o provedor e nao carregava os modelos certos"):
+    // sem isto, ao trocar de Ollama para Groq a busca dos modelos locais
+    // continuava em voo; quando ela respondia (depois), chamava setDynamicModels
+    // e a lista do Ollama SOBRESCREVIA a do Groq. Como o <select> abaixo usa
+    // `dynamicModels` sempre que ele nao esta vazio, o usuario via os modelos do
+    // provedor anterior — e escolher um deles dava 404, porque aquele modelo nao
+    // existe no provedor selecionado.
+    let ativo = true;
+
     if (selectedProvider === 'ollama') {
       setLoadingModels(true);
-      fetch('/ollama/models').then(r => r.ok ? r.json() : { models: [] }).then(data => {
+      fetch('/ollama/models', { headers: authHeaders() }).then(r => r.ok ? r.json() : { models: [] }).then(data => {
+        if (!ativo) return;
         const visionPatterns = /vl|vision|llava|gemma4/i;
         const models = (data.models || []).map((m: string) => ({
           id: m,
@@ -243,10 +436,11 @@ const JarvisPage: React.FC = () => {
           setSelectedModel(models[0].id);
         }
         setLoadingModels(false);
-      }).catch(() => { setDynamicModels([]); setLoadingModels(false); });
+      }).catch(() => { if (!ativo) return; setDynamicModels([]); setLoadingModels(false); });
     } else if (selectedProvider === 'llamacpp') {
       setLoadingModels(true);
-      fetch('/llamacpp/models').then(r => r.ok ? r.json() : { models: [] }).then(data => {
+      fetch('/llamacpp/models', { headers: authHeaders() }).then(r => r.ok ? r.json() : { models: [] }).then(data => {
+        if (!ativo) return;
         const models = (data.models || []).map((m: any) => ({
           id: m.id || m.file,
           label: m.label || m.id || m.file,
@@ -257,10 +451,15 @@ const JarvisPage: React.FC = () => {
           setSelectedModel(models[0].id);
         }
         setLoadingModels(false);
-      }).catch(() => { setDynamicModels([]); setLoadingModels(false); });
+      }).catch(() => { if (!ativo) return; setDynamicModels([]); setLoadingModels(false); });
     } else {
+      // Provider estatico: limpa a lista dinamica para o <select> cair na
+      // lista fixa do PROVIDERS correspondente.
       setDynamicModels([]);
+      setLoadingModels(false);
     }
+
+    return () => { ativo = false; };
   }, [selectedProvider]);
 
   useEffect(() => {
@@ -646,6 +845,64 @@ const JarvisPage: React.FC = () => {
 
   const activeToolCount = processLog.filter(p => p.type === 'tool_start' && p.status === 'running').length;
 
+  // ── Lista unificada de provedores ────────────────────────────────────────
+  //
+  // Junta tres origens, sem duplicar:
+  //   1. PROVIDERS (estatico) — tem os modelos JA VERIFICADOS por chamada real;
+  //   2. comuns do backend que nao estao no estatico (DeepSeek, xAI, Mistral,
+  //      Anthropic, Together, Fireworks, Cerebras, Perplexity, DeepInfra, e os
+  //      servidores locais LM Studio / vLLM / text-gen-webui / Jan);
+  //   3. personalizados criados pelo usuario.
+  //
+  // Isto resolve a causa raiz do "nao tenho onde colar a chave da OpenAI": a
+  // secao de chaves e montada a partir DESTA lista, entao todo provedor que o
+  // backend aceita tem campo.
+  const provedoresUnificados = [
+    ...PROVIDERS.map(p => ({
+      id: p.id,
+      label: p.label,
+      keyField: p.keyField,
+      dynamic: !!p.dynamic,
+      models: (p.models || []) as { id: string; label: string }[],
+      precisaChave: !!p.keyField,
+      local: false,
+      aviso: '',
+      personalizado: false,
+    })),
+    ...provedoresRemotos
+      .filter(r => r && r.id && !PROVIDERS.some(p => p.id === r.id))
+      .map(r => {
+        const conhecidos = modelosBuscados[r.id] || r.models || [];
+        return {
+          id: r.id as string,
+          label: (r.label || r.id) as string,
+          keyField: (r.precisa_chave ? r.id : '') as string,
+          dynamic: false,
+          models: conhecidos as { id: string; label: string }[],
+          precisaChave: !!r.precisa_chave,
+          local: !!r.local,
+          aviso: (r.aviso || '') as string,
+          personalizado: r.tipo === 'personalizado',
+        };
+      }),
+  ];
+
+  // Somente os que precisam de chave aparecem na secao "Chaves de API"
+  const provedoresComChave = provedoresUnificados.filter(p => p.precisaChave);
+
+  // Modelos do provedor ATIVO.
+  //
+  // A lista dinamica (Ollama/llama.cpp, detectada em runtime) so vale para os
+  // provedores marcados `dynamic: true`. Antes o seletor usava `dynamicModels`
+  // sempre que ele nao estivesse vazio, entao um resto de lista do Ollama
+  // aparecia sob outro provedor e o modelo escolhido dava 404.
+  const providerAtual = provedoresUnificados.find(p => p.id === selectedProvider);
+  const modelosDisponiveis = providerAtual?.dynamic
+    ? dynamicModels
+    : (providerAtual?.models?.length
+        ? providerAtual.models
+        : (modelosBuscados[selectedProvider] || []));
+
   return (
     <div style={s.container}>
       <div style={s.chatLayout}>
@@ -676,13 +933,26 @@ const JarvisPage: React.FC = () => {
               <button style={s.settingsBtn} onClick={clearMessages} title="Limpar chat">{'\uD83D\uDDD1\uFE0F'}</button>
             </div>
             <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-              <select value={selectedProvider} onChange={(e) => { setSelectedProvider(e.target.value); const prov = PROVIDERS.find(p => p.id === e.target.value); if (prov && prov.models.length > 0) setSelectedModel(prov.models[0].id); }} style={s.modelSelect}>
-                {PROVIDERS.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+              <select value={selectedProvider} onChange={(e) => {
+                const novo = e.target.value;
+                setSelectedProvider(novo);
+                // Ao trocar de provedor o modelo anterior quase sempre nao existe
+                // no novo. Sem isto o <select> de modelo ficava sem valor valido
+                // (aparecia em branco) porque `value` nao casava com nenhuma
+                // <option> — o que parecia "nao carregou os modelos".
+                const prov = provedoresUnificados.find(p => p.id === novo);
+                const lista = prov?.models?.length ? prov.models : (modelosBuscados[novo] || []);
+                setSelectedModel(lista.length ? lista[0].id : '');
+              }} style={s.modelSelect}>
+                {provedoresUnificados.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
               </select>
               <select value={selectedModel} onChange={(e) => setSelectedModel(e.target.value)} style={s.modelSelectWide}>
-                {((dynamicModels.length > 0 ? dynamicModels : (PROVIDERS.find(p => p.id === selectedProvider)?.models || []))).map(m => (
+                {modelosDisponiveis.map(m => (
                   <option key={m.id} value={m.id}>{(m as any).hasVision ? '\uD83D\uDC41 ' : ''}{m.label}</option>
                 ))}
+                {modelosDisponiveis.length === 0 && (
+                  <option value="">(use "Buscar modelos" nas Configuracoes)</option>
+                )}
               </select>
             </div>
           </div>
@@ -819,25 +1089,320 @@ const JarvisPage: React.FC = () => {
             <div style={s.modalBody}>
               <div style={s.settingsSection}>
                 <div style={s.sectionTitle}>Chaves de API</div>
-                {PROVIDERS.filter(p => !p.dynamic).map(prov => (
+                {/* Texto de ajuda: o usuario nao encontrou onde colar a chave da
+                    OpenAI (o campo nao existia) e tambem nao tinha como saber se
+                    uma chave salva estava funcionando. As duas coisas foram
+                    corrigidas; esta linha explica o fluxo. */}
+                <div style={{ fontSize: 11, color: '#888', marginBottom: 8, lineHeight: 1.5 }}>
+                  Ha um campo por provedor. Cole a chave e clique em <b style={{ color: '#9ecbff' }}>Salvar</b>; depois
+                  clique em <b style={{ color: '#9ecbff' }}>Testar</b> — o teste faz uma chamada de verdade ao provedor e
+                  diz se a chave funciona, se esta sem saldo ou se o modelo nao existe mais.
+                  <br />
+                  Uma chave salva <b>nao</b> significa chave funcionando: pode estar revogada ou com a conta sem credito.
+                  <br />
+                  Falta um provedor? Use <b style={{ color: '#9ecbff' }}>+ Adicionar provedor</b> no fim da lista.
+                </div>
+                {provedoresComChave.map(prov => (
                   <div key={prov.id} style={s.settingsRow}>
-                    <label style={s.settingsLabel}>{prov.label}</label>
+                    <label style={s.settingsLabel} title={prov.aviso || prov.label}>
+                      {prov.label}
+                      {prov.personalizado && <span style={{ color: '#7c9', fontSize: 9 }}> (seu)</span>}
+                    </label>
                     <div style={{ display: 'flex', gap: 6, flex: 1 }}>
                       <input type="password" value={prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '')}
                         onChange={(e) => { if (prov.keyField === 'gemini') setApiKey(e.target.value); else setApiKeys({ ...apiKeys, [prov.keyField]: e.target.value }); }}
                         style={s.configInput} placeholder="sk-..." />
-                      <button onClick={() => {
+
+                      {/* Buscar modelos: pergunta ao provedor quais modelos ele tem.
+                          Serve para nao digitar um por um — e o unico jeito de
+                          usar um provedor novo sem adivinhar os nomes. */}
+                      <button onClick={async () => {
+                        setBuscandoModelos(prov.id);
+                        try {
+                          const r = await fetch('/api/config/provedores/modelos', {
+                            method: 'POST',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ provider: prov.id }),
+                          });
+                          const j = await r.json().catch(() => null);
+                          if (!j) { alert(`${prov.label}: resposta inesperada.`); return; }
+                          if (!j.ok) { alert(`${prov.label}: ${j.mensagem}`); return; }
+                          setModelosBuscados(prev => ({ ...prev, [prov.id]: j.modelos || [] }));
+                          alert(`${prov.label}: ${j.mensagem}`);
+                        } catch (e: any) {
+                          alert(`${prov.label}: falha ao buscar modelos (${e?.message || 'rede'}).`);
+                        } finally {
+                          setBuscandoModelos(null);
+                        }
+                      }} disabled={buscandoModelos === prov.id}
+                        style={{ ...s.saveBtn, background: '#333', color: '#bbb', fontSize: 10 }}>
+                        {buscandoModelos === prov.id ? '...' : 'Modelos'}
+                      </button>
+                      <button onClick={async () => {
                         const key = prov.keyField === 'gemini' ? apiKey : (apiKeys[prov.keyField] || '');
-                        if (prov.keyField === 'gemini') { tenantSet('saas_api_key', key); setApiKey(key); fetch('/api/config/api-key', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gemini_api_key: key }) }).catch(() => {}); }
-                        else { tenantSet(`${prov.keyField}_api_key`, key); setApiKeys({ ...apiKeys, [prov.keyField]: key }); }
+
+                        // Guarda: o marcador de "ja salva" nao e uma chave.
+                        // Enviar isso ao servidor SOBRESCREVERIA a chave real.
+                        if (ehSentinela(key) || ehSentinela(apiKey)) {
+                          alert('A chave ja esta salva no servidor.\n\nPara troca-la, digite a nova chave no campo e clique em Salvar.');
+                          return;
+                        }
+
+                        if (!key.trim()) {
+                          alert(`Digite a chave de ${prov.label} antes de salvar.`);
+                          return;
+                        }
+
+                        // Salva SO ESTE provider.
+                        //
+                        // Antes montava um payload com TODOS os providers, e os
+                        // que estavam com o marcador iam junto — o backend gravava
+                        // o marcador por cima da chave verdadeira no .env.
                         const envKeyMap: Record<string, string> = { gemini: 'GEMINI_API_KEY', openrouter: 'OPENROUTER_API_KEY', openai: 'OPENAI_API_KEY', groq: 'GROQ_API_KEY', nvidia: 'NVIDIA_API_KEY', mimo: 'MIMO_API_KEY', openclaude: 'OPENCLAUDE_API_KEY', opencode: 'OPENCODE_API_KEY', zhipu: 'ZHIPU_API_KEY' };
+
+                        // FALLBACK para os provedores que NAO estao no mapa fixo:
+                        // os comuns novos (DeepSeek, xAI, Mistral...) e os criados
+                        // pelo usuario. O padrao e <ID>_API_KEY, o MESMO que o
+                        // backend monta em `provedores.env_key_do_id()`.
+                        //
+                        // Sem isto, clicar Salvar num provedor novo nao enviava
+                        // nada (envKeyMap[id] era undefined) e a chave era
+                        // silenciosamente descartada — a mesma classe de bug que
+                        // estamos consertando.
+                        const envKey = envKeyMap[prov.keyField]
+                          || (prov.keyField ? `${prov.keyField.toUpperCase()}_API_KEY` : '');
                         const envPayload: Record<string, string> = {};
-                        Object.keys(envKeyMap).forEach(pk => { envPayload[envKeyMap[pk]] = pk === 'gemini' ? (pk === prov.keyField ? key : (apiKeys['gemini'] || tenantGet('saas_api_key') || '')) : pk === prov.keyField ? key : (apiKeys[pk] || tenantGet(`${pk}_api_key`) || ''); });
-                        fetch('/api/config/api-keys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(envPayload) }).catch(() => {});
+                        if (envKey && key.trim()) envPayload[envKey] = key.trim();
+
+                        // IMPORTANTE: NAO usar `.catch(() => {})`.
+                        //
+                        // Antes o erro era engolido e o alerta dizia "salva" mesmo
+                        // quando o servidor recusava — foi assim que o usuario viu
+                        // "troco a chave e o .env nao muda" sem nenhuma pista.
+                        const falhas: string[] = [];
+                        try {
+                          // --- Gemini: endpoint dedicado (grava .env + api_keys.json) ---
+                          if (prov.keyField === 'gemini') {
+                            const r = await fetch('/api/config/api-key', {
+                              method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                              body: JSON.stringify({ gemini_api_key: key.trim() }),
+                            });
+                            if (!r.ok) {
+                              const detalhe = r.status === 401
+                                ? 'sessao expirada — faca login novamente'
+                                : await r.text().catch(() => '');
+                              falhas.push(`Gemini: HTTP ${r.status} ${detalhe}`.trim());
+                            }
+                          }
+
+                          // --- Os demais: endpoint multi-chave, so o provider salvo ---
+                          if (Object.keys(envPayload).length) {
+                            const r = await fetch('/api/config/api-keys', {
+                              method: 'PUT', headers: authHeaders({ 'Content-Type': 'application/json' }),
+                              body: JSON.stringify(envPayload),
+                            });
+                            if (!r.ok) {
+                              const detalhe = r.status === 401
+                                ? 'sessao expirada — faca login novamente'
+                                : await r.text().catch(() => '');
+                              falhas.push(`${prov.label}: HTTP ${r.status} ${detalhe}`.trim());
+                            } else {
+                              const j = await r.json().catch(() => null);
+                              if (j && Array.isArray(j.recusados) && j.recusados.length) {
+                                falhas.push(`${prov.label}: o servidor recusou o valor (parece mascarado/placeholder).`);
+                              }
+                            }
+                          }
+                        } catch (e: any) {
+                          falhas.push(`${prov.label}: ${e?.message || 'falha de rede'}`);
+                        }
+
+                        if (falhas.length) {
+                          alert('A chave NAO foi salva.\n\n' + falhas.join('\n') +
+                            '\n\nVerifique se a sessao ainda esta valida (faca login de novo) e tente outra vez.');
+                          return;
+                        }
+
+                        tenantSet(`${prov.keyField}_api_key`, key.trim());
+                        if (prov.keyField === 'gemini') { tenantSet('saas_api_key', key.trim()); setApiKey(key.trim()); }
+                        else setApiKeys({ ...apiKeys, [prov.keyField]: key.trim() });
+
+                        alert(`Chave de ${prov.label} salva no servidor.`);
                       }} style={s.saveBtn}>Salvar</button>
+
+                      {/* Testar: faz uma chamada de chat REAL com a chave salva.
+                          Existe porque "salvo" nao significa "funcionando" — a
+                          chave pode estar revogada (401), a conta sem saldo
+                          (402/429) ou o modelo extinto (404). Antes o usuario so
+                          descobria isso ao tentar conversar. */}
+                      <button onClick={async () => {
+                        const modelo = prov.keyField === 'gemini'
+                          ? selectedModel
+                          : (prov.models[0]?.id || '');
+                        setTestando(prov.keyField);
+                        try {
+                          const r = await fetch('/api/config/testar-chave', {
+                            method: 'POST',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ provider: prov.keyField, model: modelo }),
+                          });
+                          if (r.status === 401) {
+                            alert('Sessao expirada — faca login novamente.');
+                            return;
+                          }
+                          const j = await r.json().catch(() => null);
+                          if (!j) { alert(`${prov.label}: resposta inesperada do servidor.`); return; }
+                          if (j.ok) {
+                            alert(`${prov.label}: OK\n\n${j.mensagem}\n\nResposta do modelo: ${j.resposta || '(vazia)'}`);
+                          } else {
+                            alert(`${prov.label}: NAO FUNCIONA\n\n${j.mensagem}` +
+                              (j.erro ? `\n\nDetalhe tecnico:\n${j.erro}` : ''));
+                          }
+                        } catch (e: any) {
+                          alert(`${prov.label}: falha ao testar (${e?.message || 'erro de rede'}).`);
+                        } finally {
+                          setTestando(null);
+                        }
+                      }} disabled={testando === prov.keyField}
+                        style={{ ...s.saveBtn, background: '#2a3f5f', color: '#9ecbff' }}>
+                        {testando === prov.keyField ? '...' : 'Testar'}
+                      </button>
+
+                      {/* Remover so para provedores CRIADOS pelo usuario. Os
+                          comuns vem do codigo e nao podem ser apagados. */}
+                      {prov.personalizado && (
+                        <button onClick={async () => {
+                          if (!confirm(`Remover o provedor "${prov.label}"?\n\nA chave salva permanece no servidor.`)) return;
+                          try {
+                            const r = await fetch(`/api/config/provedores/${encodeURIComponent(prov.id)}`, {
+                              method: 'DELETE', headers: authHeaders(),
+                            });
+                            if (!r.ok) { alert(`Nao consegui remover (HTTP ${r.status}).`); return; }
+                            setProvedoresRemotos(prev => prev.filter(p => p.id !== prov.id));
+                            alert(`Provedor "${prov.label}" removido.`);
+                          } catch (e: any) {
+                            alert(`Falha ao remover: ${e?.message || 'rede'}`);
+                          }
+                        }} style={{ ...s.saveBtn, background: '#3a2222', color: '#f88', fontSize: 10 }}>X</button>
+                      )}
                     </div>
                   </div>
                 ))}
+
+                {/* ── Criar provedor novo ────────────────────────────────────
+                    Qualquer servico que fale a API do OpenAI (a maioria, e
+                    tambem servidores locais como LM Studio / vLLM) funciona
+                    aqui: basta a URL base, a chave e os modelos. Sem deploy. */}
+                {formProvedor === null ? (
+                  <button onClick={() => setFormProvedor({ id: '', label: '', base_url: '', api_key: '' })}
+                    style={{ ...s.saveBtn, marginTop: 8, background: '#1e3a2e', color: '#7c9' }}>
+                    + Adicionar provedor
+                  </button>
+                ) : (
+                  <div style={{ marginTop: 10, padding: 10, background: '#141414', border: '1px solid #2a2a2a', borderRadius: 6 }}>
+                    <div style={{ fontSize: 11, color: '#9ecbff', marginBottom: 8, fontWeight: 600 }}>
+                      Novo provedor
+                    </div>
+                    <div style={{ fontSize: 10, color: '#888', marginBottom: 8, lineHeight: 1.5 }}>
+                      Funciona com qualquer servico que use a API do OpenAI. A URL base costuma terminar em
+                      <b> /v1</b> (ex: <code style={{ color: '#bbb' }}>https://api.exemplo.com/v1</code>).
+                      Servidores locais tambem entram (ex: <code style={{ color: '#bbb' }}>http://localhost:1234/v1</code>
+                      para o LM Studio).
+                    </div>
+
+                    {[
+                      { campo: 'label' as const, rotulo: 'Nome', exemplo: 'Meu Provedor' },
+                      { campo: 'base_url' as const, rotulo: 'URL base', exemplo: 'https://api.exemplo.com/v1' },
+                      { campo: 'api_key' as const, rotulo: 'Chave da API', exemplo: 'sk-...' },
+                    ].map(({ campo, rotulo, exemplo }) => (
+                      <div key={campo} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                        <label style={{ ...s.settingsLabel, minWidth: 90 }}>{rotulo}</label>
+                        <input
+                          type={campo === 'api_key' ? 'password' : 'text'}
+                          value={formProvedor[campo]}
+                          onChange={e => setFormProvedor({ ...formProvedor, [campo]: e.target.value })}
+                          placeholder={exemplo}
+                          style={{ ...s.configInput, flex: 1 }}
+                        />
+                      </div>
+                    ))}
+
+                    <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+                      <button disabled={salvandoProvedor} onClick={async () => {
+                        const f = formProvedor;
+                        if (!f.label.trim() || !f.base_url.trim()) {
+                          alert('Preencha pelo menos o Nome e a URL base.');
+                          return;
+                        }
+                        setSalvandoProvedor(true);
+                        try {
+                          // 1. Cria o provedor no registro do backend
+                          const r = await fetch('/api/config/provedores', {
+                            method: 'POST',
+                            headers: authHeaders({ 'Content-Type': 'application/json' }),
+                            body: JSON.stringify({ label: f.label, base_url: f.base_url }),
+                          });
+                          const j = await r.json().catch(() => null);
+                          if (!r.ok) {
+                            alert(`Nao consegui criar: ${j?.detail || `HTTP ${r.status}`}`);
+                            return;
+                          }
+                          const criado = j.provedor;
+
+                          // 2. Se veio chave, salva junto (mesmo fluxo das outras)
+                          if (f.api_key.trim()) {
+                            await fetch('/api/config/api-keys', {
+                              method: 'PUT',
+                              headers: authHeaders({ 'Content-Type': 'application/json' }),
+                              body: JSON.stringify({ [criado.key_env]: f.api_key.trim() }),
+                            });
+                          }
+
+                          // 3. Descobre os modelos automaticamente
+                          let msgExtra = '\n\nAgora use o botao "Modelos" na linha dele para carregar a lista.';
+                          try {
+                            const rm = await fetch('/api/config/provedores/modelos', {
+                              method: 'POST',
+                              headers: authHeaders({ 'Content-Type': 'application/json' }),
+                              body: JSON.stringify({ provider: criado.id }),
+                            });
+                            const jm = await rm.json().catch(() => null);
+                            if (jm?.ok && jm.modelos?.length) {
+                              setModelosBuscados(prev => ({ ...prev, [criado.id]: jm.modelos }));
+                              // Persiste os modelos no registro
+                              await fetch('/api/config/provedores', {
+                                method: 'POST',
+                                headers: authHeaders({ 'Content-Type': 'application/json' }),
+                                body: JSON.stringify({ label: criado.label, base_url: criado.base_url, models: jm.modelos }),
+                              });
+                              msgExtra = `\n\n${jm.total} modelos carregados automaticamente.`;
+                            } else if (jm && !jm.ok) {
+                              msgExtra = `\n\nNao consegui listar os modelos: ${jm.mensagem}`;
+                            }
+                          } catch { /* segue sem modelos */ }
+
+                          // Recarrega a lista de provedores
+                          const rl = await fetch('/api/config/provedores', { headers: authHeaders() });
+                          const jl = await rl.json().catch(() => null);
+                          if (jl) setProvedoresRemotos([...(jl.comuns || []), ...(jl.personalizados || [])]);
+
+                          setFormProvedor(null);
+                          alert(`Provedor "${criado.label}" criado.${msgExtra}\n\nClique em Testar para confirmar que funciona.`);
+                        } catch (e: any) {
+                          alert(`Falha ao criar: ${e?.message || 'rede'}`);
+                        } finally {
+                          setSalvandoProvedor(false);
+                        }
+                      }} style={{ ...s.saveBtn, background: '#1e3a2e', color: '#7c9' }}>
+                        {salvandoProvedor ? '...' : 'Criar'}
+                      </button>
+                      <button onClick={() => setFormProvedor(null)}
+                        style={{ ...s.saveBtn, background: '#333', color: '#999' }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div style={s.settingsSection}>

@@ -16,9 +16,29 @@ from pathlib import Path
 
 AQUI = Path(__file__).resolve().parent
 RAIZ = AQUI.parent
-VENV_PY = RAIZ / "venv" / "Scripts" / "python.exe"
-if not VENV_PY.exists():
-    VENV_PY = RAIZ / "venv" / "bin" / "python"   # Linux
+
+# Onde esta o interpretador com as dependencias do backend.
+#
+# POR QUE UMA LISTA: os dois projetos gemeos do DEEP-OS guardam o venv em
+# lugares diferentes —
+#   C:\DEEP-OS        -> <raiz>\venv\Scripts\python.exe      (Windows)
+#   C:\DEEP-OS-LOCAL  -> <raiz>\backend\venv\Scripts\python.exe
+# Antes o runner olhava so `<raiz>/venv`, entao no LOCAL ele nao achava o Python
+# e o suite inteiro falhava na largada (parecia bug do codigo, era do runner).
+CANDIDATOS_VENV = [
+    RAIZ / "venv" / "Scripts" / "python.exe",
+    RAIZ / "backend" / "venv" / "Scripts" / "python.exe",
+    RAIZ / ".venv" / "Scripts" / "python.exe",
+    RAIZ / "venv" / "bin" / "python",              # Linux
+    RAIZ / "backend" / "venv" / "bin" / "python",  # Linux
+    RAIZ / ".venv" / "bin" / "python",
+]
+VENV_PY = next((p for p in CANDIDATOS_VENV if p.exists()), None)
+SEM_VENV = VENV_PY is None
+if SEM_VENV:
+    # Ultimo recurso: o proprio interpretador que esta rodando este arquivo.
+    # Assim o suite roda mesmo sem venv (com as dependencias do sistema).
+    VENV_PY = Path(sys.executable)
 
 # (arquivo, descricao, marcador de sucesso)
 TESTES = [
@@ -44,6 +64,14 @@ TESTES = [
      "lembretes OK"),
     ("test_reminder_summary.py", "Lembretes: resumo em documento + download",
      "TODOS OS TESTES PASSARAM"),
+    ("test_api_keys.py", "Chaves de API: placeholder ('***saved***') nao sobrescreve chave real",
+     "TODOS OS TESTES PASSARAM"),
+    ("test_model_lists.py", "Modelos: listas coerentes entre arquivos, sem IDs extintos",
+     "TODOS OS TESTES PASSARAM"),
+    ("test_charon_barge_in.py", "Charon: saudacao curta + interrupcao (barge-in)",
+     "TODOS OS TESTES PASSARAM"),
+    ("test_provedores.py", "Provedores: comuns + personalizados criados pelo usuario",
+     "TODOS OS TESTES PASSARAM"),
     ("audit_headless_tools.py", "Auditoria: quais tools carregam (headless)",
      "NAO importam/carregam: 0"),
 ]
@@ -59,6 +87,10 @@ def main() -> int:
 
     print("=" * 72)
     print(f"DEEP-OS — testes manuais  ({len(alvos)} arquivo(s))")
+    print(f"Projeto: {RAIZ}")
+    if SEM_VENV:
+        print("AVISO: nao encontrei o venv do projeto — usando o interpretador atual.")
+        print("       Se faltar dependencia, rode com o Python do venv do backend.")
     print(f"Python: {VENV_PY}")
     print("=" * 72)
 

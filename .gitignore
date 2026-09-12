@@ -34,6 +34,11 @@ backend/config/api_keys.json
 # Se vazar, qualquer pessoa forja tokens validos e se passa por qualquer tenant.
 backend/config/jwt_secret.key
 
+# Provedores personalizados criados pelo usuario pela interface.
+# Nao contem chave (guarda so o NOME da variavel de ambiente), mas e configuracao
+# de cada instancia: o VPS tem os seus, o PC tem os seus.
+backend/config/provedores_custom.json
+
 # Pessoal (dados sensíveis)
 pessoal/
 

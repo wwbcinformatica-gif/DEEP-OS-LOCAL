@@ -1,4 +1,5 @@
 import json
+import os
 import re
 
 import httpx
@@ -107,7 +108,13 @@ def _load_key_from_file(provider: str) -> str:
             "openclaude": "openclaude_api_key",
             "zhipu": "zhipu_api_key",
         }
-        return data.get(key_map.get(provider, ""), "")
+        chave_json = key_map.get(provider)
+        if chave_json:
+            return data.get(chave_json, "")
+        # Provedor PERSONALIZADO: o frontend salva como "<id>_api_key", sem
+        # precisar de entrada no key_map. Assim um provedor criado pelo usuario
+        # funciona sem alterar codigo.
+        return data.get(f"{provider}_api_key", "")
     except Exception:
         return ""
 
@@ -191,6 +198,46 @@ def get_client(provider: str, api_key_override: str = "", timeout_read: float = 
         )
     elif provider == "llamacpp":
         return AsyncOpenAI(base_url="http://localhost:8080/v1", api_key="llamacpp", timeout=timeout)
+
+    # ── Provedor registrado (comum novo ou CRIADO PELO USUARIO) ──────────────
+    #
+    # Antes, todo provedor exigia um `elif` aqui. Agora basta estar registrado em
+    # `core/provedores.py`: os comuns vem de PRESETS e os personalizados do
+    # arquivo `config/provedores_custom.json` (criados pela interface).
+    #
+    # Isso resolve o problema real de "sempre aparece provedor novo": o usuario
+    # adiciona pela tela, sem alterar codigo e sem novo deploy.
+    try:
+        from core.provedores import resolver as _resolver_provedor
+
+        meta = _resolver_provedor(provider)
+    except Exception:
+        meta = None
+
+    if meta and meta.get("base_url"):
+        if not meta.get("compativel_openai", True):
+            raise ValueError(
+                f"O provedor '{provider}' nao e compativel com a API do OpenAI, "
+                "que e a que o DEEP-OS usa."
+            )
+        chave = api_key_override or os.environ.get(meta.get("key_env") or "", "") or _load_key_from_file(provider)
+        if not chave:
+            if meta.get("local"):
+                # Servidor local (LM Studio, vLLM...) costuma aceitar qualquer
+                # texto como chave; exigir uma travaria o uso sem motivo.
+                chave = "local"
+            else:
+                raise ValueError(
+                    f"{meta.get('key_env') or 'A chave'} nao configurada para "
+                    f"'{meta.get('label', provider)}'. Salve em Jarvis > "
+                    "Configuracoes > Chaves de API e clique em Testar."
+                )
+        return AsyncOpenAI(
+            base_url=meta["base_url"] if meta["base_url"].endswith("/") else meta["base_url"] + "/",
+            api_key=chave,
+            timeout=timeout,
+        )
+
     raise ValueError(f"Unknown provider: {provider}")
 
 

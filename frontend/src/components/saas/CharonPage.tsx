@@ -289,6 +289,23 @@ const CharonPage: React.FC = () => {
   const userNameRef = useRef('');
   const contextFilterRef = useRef('');
 
+  // ── Barge-in (interromper o Charon falando) ──────────────────────────────
+  //
+  // O Charon so deve calar quando o USUARIO fala — nao com qualquer ruido.
+  // `charonFalandoRef` espelha o status num ref porque o callback do microfone
+  // e criado uma vez e leria um `useState` desatualizado.
+  const charonFalandoRef = useRef(false);
+  // Instante em que a ultima interrupcao foi enviada (evita mandar 30 vezes).
+  const ultimaInterrupcaoRef = useRef(0);
+  // Contador de chunks seguidos com voz acima do limite. Exigir alguns chunks
+  // (e nao um so) evita que um estalo, um teclado ou a propria voz do Charon
+  // saindo no alto-falante interrompam a fala sozinhos.
+  const chunksComVozRef = useRef(0);
+  // Depois de interromper, descarta o audio que ja estava em transito na rede.
+  // Sem isto os chunks enviados nos ~400ms anteriores chegam e o Charon continua
+  // falando baixinho por cima do usuario — a interrupcao parecia "meio furada".
+  const ignorarAudioAteRef = useRef(0);
+
   useEffect(() => {
     const savedKey = tenantGet('saas_api_key') || '';
     const savedVoice = tenantGet('charon_voice') || 'Charon';
@@ -665,10 +682,16 @@ const CharonPage: React.FC = () => {
         if (e.data instanceof Blob) {
           const buf = await e.data.arrayBuffer();
           const bytes = new Uint8Array(buf);
+          // Audio em transito logo apos uma interrupcao: descarta para o Charon
+          // nao continuar falando por cima do usuario.
+          if (Date.now() < ignorarAudioAteRef.current) return;
           if (bytes.length >= 2) {
             const pcm16 = new Int16Array(bytes.buffer, bytes.byteOffset, bytes.length / 2);
             audioBufRef.current.push(pcm16);
           }
+          // Marca que o Charon esta falando: e o que habilita a deteccao de
+          // barge-in pelo nivel do microfone.
+          charonFalandoRef.current = true;
           setVoiceStatus('speaking');
           return;
         }
@@ -686,7 +709,20 @@ const CharonPage: React.FC = () => {
             addActivity(`${m.tool}: ${m.result}`, 'tool');
           } else if (m.type === 'tool_start') {
             addActivity(`Executando: ${m.tool}...`, 'tool');
+          } else if (m.type === 'interrupted') {
+            // O Gemini (VAD do servidor) detectou a fala do usuario. Esvazia a
+            // fila local na hora — o servidor ja parou de gerar, mas o audio
+            // que o navegador ja tinha baixado continuaria tocando.
+            charonFalandoRef.current = false;
+            chunksComVozRef.current = 0;
+            audioBufRef.current = [];
+            if (playNodeRef.current) {
+              try { playNodeRef.current.port.postMessage({ type: 'clear' }); } catch {}
+            }
+            setVoiceStatus('listening');
           } else if (m.type === 'turn_complete') {
+            charonFalandoRef.current = false;
+            chunksComVozRef.current = 0;
             setVoiceStatus('listening');
           } else if (m.type === 'error') {
             setError(m.message);
@@ -794,7 +830,26 @@ const CharonPage: React.FC = () => {
             }
             let sum = 0;
             for (let i = 0; i < pcm16.length; i++) sum += Math.abs(pcm16[i]);
-            setAudioLevel(Math.min(1, (sum / pcm16.length / 0x8000) * 3));
+            const nivel = sum / pcm16.length / 0x8000;
+            setAudioLevel(Math.min(1, nivel * 3));
+
+            // ── Barge-in: o usuario falou por cima do Charon ──────────────
+            //
+            // Reaproveita o nivel que ja era calculado para o medidor da tela.
+            // Limite de 0.06 (~ -44 dBFS) e 3 chunks seguidos: baixo o bastante
+            // para pegar fala normal, alto o bastante para ignorar ruido de
+            // fundo. Exigir 3 chunks evita que um estalo ou o proprio audio do
+            // Charon saindo no alto-falante disparem a interrupcao.
+            if (charonFalandoRef.current) {
+              if (nivel > 0.06) {
+                chunksComVozRef.current += 1;
+                if (chunksComVozRef.current >= 3) {
+                  interromperCharon('voce falou');
+                }
+              } else {
+                chunksComVozRef.current = 0;
+              }
+            }
           };
 
           source.connect(node);
@@ -882,6 +937,50 @@ const CharonPage: React.FC = () => {
     setVoiceStatus('idle');
     setAudioLevel(0);
   }, []);
+
+  /**
+   * Faz o Charon parar de falar imediatamente para ouvir o usuario.
+   *
+   * POR QUE ISSO PRECISA EXISTIR NO NAVEGADOR
+   * O Gemini Live ja detecta a fala do usuario no servidor, mas sozinho isso
+   * nao basta: quando o Charon esta falando, ja existem SEGUNDOS de audio
+   * baixados esperando na fila local (o `audioBufRef` + o ring do worklet de
+   * reproducao). Mesmo que o servidor pare de mandar, o navegador continua
+   * tocando o que ja recebeu — o Charon "nao para de falar".
+   *
+   * Por isso a interrupcao tem duas partes:
+   *   1. esvaziar a fila e o ring locais (silencio imediato, sem esperar a rede);
+   *   2. avisar o servidor (`type: 'interrupt'`) para ele descartar o turno e
+   *      mandar `interrupt=True` ao Gemini.
+   *
+   * Usa apenas refs, entao nao sofre com closure desatualizada no callback do
+   * microfone (que e registrado uma unica vez).
+   */
+  const interromperCharon = (motivo: string) => {
+    const agora = Date.now();
+    // Nao repetir a cada chunk: no maximo uma interrupcao por segundo.
+    if (agora - ultimaInterrupcaoRef.current < 1000) return;
+    ultimaInterrupcaoRef.current = agora;
+    chunksComVozRef.current = 0;
+    charonFalandoRef.current = false;
+
+    // 1. Silencio local imediato
+    audioBufRef.current = [];
+    if (playNodeRef.current) {
+      try { playNodeRef.current.port.postMessage({ type: 'clear' }); } catch {}
+    }
+    // Descarta o que ja estava vindo pela rede
+    ignorarAudioAteRef.current = Date.now() + 400;
+
+    // 2. Avisa o servidor
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      try { ws.send(JSON.stringify({ type: 'interrupt' })); } catch {}
+    }
+
+    setVoiceStatus('listening');
+    addActivity(`Interrompido (${motivo}) — ouvindo voce`, 'system');
+  };
 
   const toggleCharon = () => {
     if (isCharonActive) {
