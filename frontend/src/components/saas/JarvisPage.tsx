@@ -91,10 +91,10 @@ const PROVIDERS = [
     { id: 'glm-5.2', label: 'GLM-5.2' },
   ]},
   { id: 'nvidia', label: 'NVIDIA NIM', keyField: 'nvidia', models: [
-    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
-    { id: 'nvidia/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
-    { id: 'nvidia/mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
-    { id: 'nvidia/gemma-2-9b-it', label: 'Gemma 2 9B' },
+    { id: 'llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
+    { id: 'llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+    { id: 'mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
+    { id: 'gemma-2-9b-it', label: 'Gemma 2 9B' },
   ]},
 ];
 
