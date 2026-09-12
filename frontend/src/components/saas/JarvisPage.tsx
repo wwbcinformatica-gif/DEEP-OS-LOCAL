@@ -107,15 +107,27 @@ function highlightCode(code: string, lang: string): React.ReactNode {
   });
 }
 
-function renderMessageContent(content: string): React.ReactNode {
-  const parts = content.split(/(```[\s\S]*?```)/g);
-  return parts.map((part, i) => {
-    const m = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
-    if (m) {
-      const lang = m[1] || '';
-      const code = m[2].replace(/\n$/, '');
-      return (
-        <div key={i} style={{
+function renderMarkdown(text: string): React.ReactNode {
+  const lines = text.split('\n');
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Code block start
+    if (line.trimStart().startsWith('```')) {
+      const lang = line.trimStart().slice(3).trim();
+      const codeLines: string[] = [];
+      i++;
+      while (i < lines.length && !lines[i].trimStart().startsWith('```')) {
+        codeLines.push(lines[i]);
+        i++;
+      }
+      i++; // skip closing ```
+      const code = codeLines.join('\n').replace(/\n$/, '');
+      elements.push(
+        <div key={elements.length} style={{
           margin: '8px 0', borderRadius: 8, overflow: 'hidden',
           border: '1px solid #2a2a3e', background: '#0d0d1a',
         }}>
@@ -136,17 +148,163 @@ function renderMessageContent(content: string): React.ReactNode {
           </pre>
         </div>
       );
+      continue;
     }
-    const inlineParts = part.split(/(`[^`]+`)/g);
-    return (
-      <span key={i}>{inlineParts.map((ip, j) => {
-        if (ip.startsWith('`') && ip.endsWith('`')) {
-          return <code key={j} style={{ background: '#1a1a2e', padding: '1px 5px', borderRadius: 4, fontSize: 12, color: '#e06c75', fontFamily: "'Cascadia Code', 'Fira Code', monospace" }}>{ip.slice(1, -1)}</code>;
-        }
-        return <span key={j}>{ip}</span>;
-      })}</span>
-    );
+
+    // Table detection
+    if (line.includes('|') && i + 1 < lines.length && lines[i + 1].includes('---')) {
+      const headers = line.split('|').map(c => c.trim()).filter(Boolean);
+      i += 2; // skip header + separator
+      const rows: string[][] = [];
+      while (i < lines.length && lines[i].includes('|')) {
+        rows.push(lines[i].split('|').map(c => c.trim()).filter(Boolean));
+        i++;
+      }
+      elements.push(
+        <div key={elements.length} style={{ margin: '8px 0', overflowX: 'auto' }}>
+          <table style={{
+            width: '100%', borderCollapse: 'collapse', fontSize: 12,
+            fontFamily: "'Cascadia Code', 'Fira Code', monospace",
+          }}>
+            <thead>
+              <tr>
+                {headers.map((h, hi) => (
+                  <th key={hi} style={{
+                    padding: '6px 10px', background: '#16162a', border: '1px solid #2a2a3e',
+                    color: '#00d9ff', fontWeight: 700, textAlign: 'left', fontSize: 11,
+                  }}>{renderInline(h)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row, ri) => (
+                <tr key={ri}>
+                  {row.map((cell, ci) => (
+                    <td key={ci} style={{
+                      padding: '5px 10px', border: '1px solid #1a1a2e',
+                      color: '#ccc', background: ri % 2 === 0 ? 'rgba(255,255,255,0.02)' : 'transparent',
+                    }}>{renderInline(cell)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+      continue;
+    }
+
+    // Horizontal rule
+    if (/^\s*[-*_]{3,}\s*$/.test(line)) {
+      elements.push(<hr key={elements.length} style={{ border: 'none', borderTop: '1px solid #2a2a3e', margin: '10px 0' }} />);
+      i++;
+      continue;
+    }
+
+    // Headers
+    const headerMatch = line.match(/^(#{1,6})\s+(.+)/);
+    if (headerMatch) {
+      const level = headerMatch[1].length;
+      const sizes: Record<number, { size: number; color: string }> = {
+        1: { size: 18, color: '#00d9ff' },
+        2: { size: 15, color: '#00d9ff' },
+        3: { size: 13, color: '#b478ff' },
+      };
+      const s = sizes[level] || { size: 13, color: '#b478ff' };
+      elements.push(
+        <div key={elements.length} style={{
+          fontSize: s.size, fontWeight: 700, color: s.color,
+          marginTop: level <= 2 ? 12 : 8, marginBottom: 4,
+          fontFamily: "'Inter', sans-serif",
+        }}>
+          {renderInline(headerMatch[2])}
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Unordered list
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const listItems: string[] = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+        listItems.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+        i++;
+      }
+      elements.push(
+        <div key={elements.length} style={{ margin: '4px 0' }}>
+          {listItems.map((item, li) => (
+            <div key={li} style={{ display: 'flex', gap: 6, padding: '2px 0', paddingLeft: 8 }}>
+              <span style={{ color: '#b478ff', flexShrink: 0 }}>{'\u25CF'}</span>
+              <span>{renderInline(item)}</span>
+            </div>
+          ))}
+        </div>
+      );
+      continue;
+    }
+
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const listItems: string[] = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        listItems.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+        i++;
+      }
+      elements.push(
+        <div key={elements.length} style={{ margin: '4px 0' }}>
+          {listItems.map((item, li) => (
+            <div key={li} style={{ display: 'flex', gap: 6, padding: '2px 0', paddingLeft: 8 }}>
+              <span style={{ color: '#00d9ff', flexShrink: 0, fontWeight: 700, fontSize: 12 }}>{li + 1}.</span>
+              <span>{renderInline(item)}</span>
+            </div>
+          ))}
+        </div>
+      );
+      continue;
+    }
+
+    // Empty line
+    if (line.trim() === '') {
+      i++;
+      continue;
+    }
+
+    // Regular paragraph — collect consecutive non-empty lines
+    const paraLines: string[] = [];
+    while (i < lines.length && lines[i].trim() !== '' && !lines[i].trimStart().startsWith('```') && !lines[i].includes('|') && !/^\s*[-*_]{3,}\s*$/.test(lines[i]) && !/^#{1,6}\s+/.test(lines[i]) && !/^\s*[-*+]\s+/.test(lines[i]) && !/^\s*\d+\.\s+/.test(lines[i])) {
+      paraLines.push(lines[i]);
+      i++;
+    }
+    if (paraLines.length > 0) {
+      elements.push(
+        <div key={elements.length} style={{ margin: '4px 0', lineHeight: 1.7 }}>
+          {paraLines.map((pl, pi) => (
+            <span key={pi}>{renderInline(pl)}{pi < paraLines.length - 1 && <br />}</span>
+          ))}
+        </div>
+      );
+    }
+  }
+
+  return elements;
+}
+
+function renderInline(text: string): React.ReactNode {
+  const parts = text.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i} style={{ color: '#e0e0e0', fontWeight: 700 }}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith('`') && part.endsWith('`')) {
+      return <code key={i} style={{ background: '#1a1a2e', padding: '1px 5px', borderRadius: 4, fontSize: 12, color: '#e06c75', fontFamily: "'Cascadia Code', 'Fira Code', monospace" }}>{part.slice(1, -1)}</code>;
+    }
+    return <span key={i}>{part}</span>;
   });
+}
+
+function renderMessageContent(content: string): React.ReactNode {
+  return renderMarkdown(content);
 }
 
 const JarvisPage: React.FC = () => {
