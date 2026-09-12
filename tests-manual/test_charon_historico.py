@@ -283,6 +283,51 @@ check("PROIBIDO" in corpo_ret,
       "sem a proibicao o modelo volta a discursar no meio da conversa")
 
 
+print()
+print("=== 8. O botao 'Charon ouvindo' desliga/liga SEM perder o contexto ===")
+# PEDIDO DO USUARIO: "tem este botao acima no painel direito 'Charon ouvindo'
+# quando clica nele e para charon parar de ouvir e interagir mas ele tambem
+# reconecta — verifica se ele e um problema para o historico".
+# E depois: "ele pode funcionar como desativar charon e ativar charon mas nao
+# pode perder o contexto da conversa".
+#
+# O botao e o cabecalho do painel direito (`s.rightHeader` com onClick
+# `toggleCharon`). Clicar em "Charon ativo" DESLIGA; clicar de novo LIGA.
+#
+# O PROBLEMA REAL: religar mandava `history: []` — uma sessao NOVA no servidor do
+# Gemini. Como o estado da conversa vive LA (por sessao), o Charon voltava sem
+# lembrar de nada no meio da conversa. Nao era o historico GRAVADO que se
+# perdia: era o CONTEXTO vivo do modelo.
+check("toggleCharon" in texto_front,
+      "o cabecalho do painel direito continua alternando ligar/desligar",
+      "o botao de ativar/desativar sumiu")
+m_rc = re.search(r"const reconectarContextoAtual = \(\) => \{(.*?)\n  \};", texto_front, re.S)
+corpo_rc = m_rc.group(1) if m_rc else ""
+check(bool(corpo_rc), "existe reconectarContextoAtual()", "o religar nao tem caminho proprio")
+check("getTranscripts(convId)" in corpo_rc,
+      "religar LE o historico gravado da conversa atual",
+      "religar nao olha o historico — voltaria como sessao nova")
+check("setRestaurarHistorico(true)" in corpo_rc and "restaurarHistoricoRef.current = true" in corpo_rc,
+      "religar marca a restauracao (state E ref, que e o que o conectar le)",
+      "marcar so o state nao chega no callback de conexao (ele le o ref)")
+check("connectVoiceRef.current()" in corpo_rc,
+      "religar conecta de fato",
+      "religar so mexe no estado e nao abre a sessao")
+# E o desligar nao pode mexer no que esta gravado.
+m_dv = re.search(r"const disconnectVoice = useCallback\(\(\) => \{(.*?)\n  \}, \[\]\);", texto_front, re.S)
+corpo_dv = m_dv.group(1) if m_dv else ""
+check(bool(corpo_dv), "isolei disconnectVoice", "nao achei disconnectVoice")
+check("deleteConversation" not in corpo_dv and "clearHistory" not in corpo_dv,
+      "parar de ouvir NAO apaga nada do historico",
+      "o desligar mexe no historico — parar de ouvir nunca deve perder conversa")
+# Fechar a aba no meio da conversa: grava uma ultima vez (localStorage e sincrono).
+check("beforeunload" in texto_front and "pagehide" in texto_front,
+      "o historico e regravado ao fechar/recarregar a aba",
+      "fechar a aba no meio da conversa pode perder a ultima fala")
+check("transcriptsRef" in texto_front and "activeConvIdRef" in texto_front,
+      "o gravador do beforeunload usa REFS (listener registrado uma vez)",
+      "sem refs, o listener leria state da primeira renderizacao (closure velha)")
+
 def funcao_que_contem(linhas: list, numero_linha: int) -> str:
     """
     Nome da funcao que contem a linha indicada.

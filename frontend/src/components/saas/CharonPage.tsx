@@ -240,6 +240,15 @@ const CharonPage: React.FC = () => {
   });
   const [transcripts, setTranscripts] = useState<TranscriptEntry[]>([]);
   const [activityLog, setActivityLog] = useState<TranscriptEntry[]>([]);
+  // Espelhos em ref do que o efeito de salvar acabou de gravar.
+  //
+  // Existem para o gravador do `beforeunload`/`pagehide`: aquele listener e
+  // registrado UMA vez, entao ler `activeConvId`/`transcripts` do state pegaria
+  // valores da primeira renderizacao (closure velha) — a mesma armadilha que ja
+  // apareceu nos callbacks de microfone e de conexao.
+  const activeConvIdRef = useRef<string>('');
+  const transcriptsRef = useRef<TranscriptEntry[]>([]);
+  const activityLogRef = useRef<TranscriptEntry[]>([]);
   const [showConvMenu, setShowConvMenu] = useState(false);
 
   // Load transcripts when active conversation changes
@@ -461,8 +470,38 @@ const CharonPage: React.FC = () => {
       if (carregandoConversaRef.current) return;
       saveTranscripts(activeConvId, transcripts);
       saveActivityLog(activeConvId, activityLog);
+      // Espelhos para o desligamento da pagina (que nao pode ler state).
+      activeConvIdRef.current = activeConvId;
+      transcriptsRef.current = transcripts;
+      activityLogRef.current = activityLog;
     }
   }, [transcripts, activityLog, activeConvId]);
+
+  // Grava o historico ao FECHAR/recarregar a aba.
+  //
+  // O efeito acima cobre o uso normal, mas se o usuario fechar a aba no meio da
+  // conversa (ou der F5) a ultima fala pode nao ter passado por ele. Aqui o
+  // registro e regravado uma ultima vez. Importante: salvar e uma escrita
+  // SINCRONA no localStorage, entao ela sobrevive ao `beforeunload` — diferente
+  // de um fetch, que o navegador cancelaria.
+  //
+  // Usa REFS, nao state: um listener registrado uma vez leria valores velhos.
+  useEffect(() => {
+    const gravar = () => {
+      const id = activeConvIdRef.current;
+      if (!id) return;
+      try {
+        saveTranscripts(id, transcriptsRef.current);
+        saveActivityLog(id, activityLogRef.current);
+      } catch { /* fechando a pagina: nao ha o que fazer alem de ignorar */ }
+    };
+    window.addEventListener('beforeunload', gravar);
+    window.addEventListener('pagehide', gravar);
+    return () => {
+      window.removeEventListener('beforeunload', gravar);
+      window.removeEventListener('pagehide', gravar);
+    };
+  }, []);
 
   useEffect(() => {
     const handleEsc = (e: KeyboardEvent) => {
@@ -983,6 +1022,13 @@ const CharonPage: React.FC = () => {
     setIsCharonActive(false);
     setVoiceStatus('idle');
     setAudioLevel(0);
+    // NAO ha nada a gravar aqui.
+    //
+    // Conferido: o efeito `useEffect(..., [transcripts, activityLog, activeConvId])`
+    // ja grava a cada mudanca de fala, e `disconnectVoice` nao altera nenhum dos
+    // tres — entao o historico ja esta no storage quando este botao e apertado.
+    // Parar de ouvir NUNCA perdeu historia; o que apagava contexto era a
+    // RECONEXAO vindo como sessao nova (ver `reconectarContextoAtual`).
   }, []);
 
   /**
@@ -1043,28 +1089,52 @@ const CharonPage: React.FC = () => {
 
   const toggleCharon = () => {
     if (isCharonActive) {
+      // Parar de ouvir. NAO mexe no historico gravado — ver `disconnectVoice`.
       disconnectVoice();
       return;
     }
-    // Apertar o Charon tambem e uma ESCOLHA: se ainda nao escolheu o contexto,
-    // entra no modo "novo chat" (saudacao, sem contexto anterior); se ja esta
-    // numa conversa, reconecta NAQUELA conversa, restaurando o historico.
+    // Apertar o Charon tambem e uma ESCOLHA de contexto. Mas, se ja existe uma
+    // conversa em andamento, ele NAO pode voltar como sessao nova: isso jogaria
+    // fora o contexto do Gemini (que vive no servidor DELE, por sessao) e ele
+    // "esqueceria" tudo no meio da conversa — o usuario via isso como "o Charon
+    // nao lembra de nada".
     if (modoInicioRef.current === 'escolher') {
       newConversation();
       return;
     }
-    if (activeConvId) {
-      // Sessao fechada no meio da conversa: reabre com o contexto dela.
-      const jaAtiva = activeConvId;
-      setActiveConvId(jaAtiva);
+    reconectarContextoAtual();
+  };
+
+  /**
+   * Reabre a sessao PRESERVANDO o contexto da conversa atual.
+   *
+   * O botao "⚡ Charon ouvindo" (o cabecalho do painel direito) para e religa o
+   * Charon. Religar como sessao nova faria ele esquecer a conversa — entao aqui
+   * decidimos:
+   *   - a conversa tem falas  -> manda o historico como contexto e ele retoma;
+   *   - a conversa esta vazia -> sessao nova mesmo (ele cumprimenta).
+   */
+  const reconectarContextoAtual = () => {
+    const convId = activeConvId;
+    const salvo = convId ? getTranscripts(convId) : [];
+    if (salvo.length > 0) {
+      setTranscripts(salvo);
+      setActivityLog(getActivityLog(convId));
       setRestaurarHistorico(true);
       restaurarHistoricoRef.current = true;
-      setTranscripts(getTranscripts(jaAtiva));
-      setActivityLog(getActivityLog(jaAtiva));
-      entrarNaConversa('Retomando o contexto desta conversa...');
+      modoInicioRef.current = 'historico';
+      setModoInicio('historico');
+      // `connectVoice` le `restaurarHistoricoRef` e envia o historico ao abrir.
+      startedRef.current ? entrarNaConversa('Retomando o contexto desta conversa...')
+                         : connectVoiceRef.current();
       return;
     }
-    connectVoice();
+    // Sem falas ainda: sessao nova na conversa que ja esta aberta.
+    setRestaurarHistorico(false);
+    restaurarHistoricoRef.current = false;
+    modoInicioRef.current = 'novo';
+    setModoInicio('novo');
+    connectVoiceRef.current();
   };
 
   const sendText = (text: string) => {
