@@ -448,7 +448,131 @@ Charon e a saudação curta. Ver a seção 14 mais abaixo para o roteiro.
 
 ---
 
-### 14. ⚠️ Não testado (depende de você)
+### 14. Voz do Jarvis: soava robótica e as barras não faziam nada
+
+**Queixas:** *"a resposta de voz parece robótica"* e *"a velocidade e o tom não
+mudam nada ou quase nada"*.
+
+**Três causas somadas:**
+
+**(a) O regex de limpeza APAGAVA A LETRA "ã".** A alternância de um dos
+`.replace` era `sdkjf|ã|©|®|™|°` — o caractere **U+00E3 estava na lista de
+remoção**. Em português:
+
+| Falado | Saía como |
+|---|---|
+| não | no |
+| então | ento |
+| informação | informaço |
+| manhã | manh |
+
+"não" é uma das palavras mais frequentes do idioma. A fala saía errada **o tempo
+todo** — é exatamente o que se descreve como voz "robótica".
+
+**(b) As barras de velocidade/tom não afetavam a voz padrão.** As vozes padrão do
+Jarvis são do tipo `edge` (Edge TTS, neural). O `speak()` mandava para `/api/tts`
+apenas `{ text, voice }`, e o backend tinha `rate="-5%"` e `pitch="-15Hz"`
+**fixos no código**. As barras só chegavam ao `speakBrowser` — o plano B, quando
+o Edge falha. Ou seja: **quem estava na voz boa não tinha controle; quem estava
+na voz ruim tinha.** O inverso do desejado.
+
+**(c) Texto longo ia numa única utterância**, perdendo a entonação do meio para
+o fim — leitura corrida e monótona.
+
+**Correção:**
+- nova função `prepararTextoParaFala()` — ponto único da limpeza, que separa o
+  que é **MARCA** (markdown) do que é **PALAVRA**: preserva acentos e cedilha,
+  remove bloco de código (não se lê código), fala o **rótulo** do link em vez da
+  URL, achata tabelas, expande `R$` → "reais", `%` → "por cento", `→` → "para",
+  e tira emojis;
+- `dividirEmFrases()` — fala **frase por frase**, para o motor reiniciar a
+  prosódia e as pausas saírem naturais;
+- `/api/tts` agora **aceita e aplica** `rate` e `pitch` (com limites, porque fora
+  deles o provedor distorce a voz); as barras passaram a ter efeito na voz Edge;
+- ponto **neutro no meio** da barra de tom (50 = voz original) — antes existia um
+  `-15Hz` escondido que deixava a voz sempre mais grave e a barra inútil;
+- a escolha da voz do navegador passou a **preferir vozes neurais/naturais** em
+  vez de cair na pt padrão do Windows (a mais robótica);
+- quando o Edge falha, o usuário é **avisado no painel** (antes era só um
+  `console.warn`: ele não sabia que tinha caído para a voz robotizada).
+
+**Teste:** `test_voz_jarvis.py` — executa a função **de verdade** (extraída do
+`.tsx` e rodada no Node). Teste só de texto não pegaria o defeito (b), que é de
+**efeito**, não de presença.
+
+---
+
+### 15. Charon: o histórico não era enviado à sessão
+
+**Queixas:** *"quando eu clico no histórico o Charon não consegue ver o
+histórico, ele sempre está em um contexto novo"* e a regra desejada: *"sempre
+for aberto pela primeira vez a sessão deve ser nova, mas quando eu entro no novo
+histórico ele deve lembrar de tudo"*.
+
+**Causa:** o **Gemini Live guarda o estado da conversa no servidor dele** e cria
+uma sessão nova a cada conexão. O frontend salvava os transcripts no
+`localStorage` e os **exibia na tela**, mas nunca os enviava.
+`switchConversation` apenas trocava o estado da tela — do ponto de vista do
+modelo, a conversa realmente começava do zero.
+
+**Correção, exatamente segundo a regra do usuário:**
+
+| Situação | Comportamento |
+|---|---|
+| Abrir o Charon (primeira vez) | **sessão nova** + saudação curta |
+| Clicar numa conversa do histórico | envia o histórico como **contexto** e faz uma **retomada curta** (sem se reapresentar) |
+
+- `_montar_turnos_historico()` converte os transcripts em turnos do Gemini
+  (papel `model`, não `assistant` — vocabulário diferente do OpenAI), junta falas
+  seguidas do mesmo lado, descarta o primeiro turno se não for do usuário, e corta
+  por **40 turnos / 12.000 caracteres** preservando sempre o **fim** da conversa;
+- o histórico vai com `turn_complete=False` (é contexto, não pergunta) e a
+  abertura escolhe entre **retomar** e **cumprimentar**;
+- trocar de conversa com a sessão aberta **reconecta** — o Gemini não "rebobina"
+  contexto, então a única forma confiável é nascer com o histórico certo;
+- indicador na tela: **"lembra da conversa"** ou **"sessão nova"**.
+
+**Bug secundário achado no caminho:** havia um **segundo**
+`self._interrupted = False` dentro de `send_audio`. Como ele roda a cada chunk do
+microfone, **desfazia o barge-in** logo em seguida. Sobreviveu à correção
+anterior porque a busca foi feita no caminho do **recebimento**, não no do
+**envio**. O teste agora varre o arquivo inteiro e exige que todo reset esteja em
+`__init__` ou `_handle_response`.
+
+---
+
+### 16. Regra dos dois projetos gêmeos (pedido do usuário)
+
+*"deixe isso especificado para que todos os modelos de AI saiba que sempre que
+fazer as alterações no projeto `C:\DEEP-OS` tem que fazer também no outro
+`C:\DEEP-OS-LOCAL`"* + *"cada um deles tem o seu repositório próprio"* +
+*"lembrando que um é para uso com vps e outro para uso local"*.
+
+A regra ficou **no topo do `AGENTS.md`** (o primeiro arquivo que um modelo lê) e
+em **`docs/DOIS-PROJETOS.md`**, cobrindo:
+
+- os dois projetos, seus **repositórios** e suas **branches** (`DEEP-OS.git`
+  /`master` e `DEEP-OS-LOCAL.git`/`main`);
+- **um push não atualiza o outro** — repositórios independentes: sincronizar os
+  arquivos e dar push em só um deixa o outro com o código novo fora do GitHub, e
+  um `reset --hard` depois apaga;
+- **proibição** de `git reset --hard` entre os dois (apagaria histórico e
+  arquivos exclusivos: `README-LOCAL.md`, `chatbot-server/`, `generated/`);
+- a **distinção de finalidade**: VPS (Linux headless, 4 GB, nginx, sem tela)
+  versus local (Windows com desktop, GPU, Ollama com 25+ modelos) — **o código é
+  o mesmo, o comportamento não**;
+- tabela de **onde cada tipo de bug aparece**: proxy/`Host`/401 só na VPS;
+  ferramenta de GUI só no LOCAL; falta de modelo local só na VPS; memória/OOM só
+  na VPS; caminho com `:` só na VPS;
+- **o que não fazer**: remover o filtro `is_headless()` para tool de GUI
+  "funcionar na VPS", assumir GPU/RAM sobrando lá, usar `C:\` em código da VPS ou
+  `/root/...` no LOCAL;
+- o procedimento de sincronização em 4 passos e o checklist final (suíte nos
+  **dois**, commit + push nos **dois**).
+
+---
+
+### 17. ⚠️ Não testado (depende de você)
 
 O barge-in e a saudação usam o Gemini Live, então **não dá para verificar sem
 microfone**. Depois do deploy, confira na tela do Charon:
