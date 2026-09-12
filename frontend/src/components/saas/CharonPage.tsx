@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { renderMarkdown } from './markdownRenderer';
 import {
   Conversation, TranscriptEntry,
   getConversations, createConversation, renameConversation, deleteConversation,
@@ -1315,7 +1316,7 @@ const handleSaveIdentity = async () => {
                       </span>
                       <span style={{ fontSize: 10, color: '#666', marginLeft: 'auto' }}>{t.time}</span>
                     </div>
-                    <div style={{ color: '#ccc', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>{t.text}</div>
+                    <div style={{ color: '#ccc', fontSize: 12, lineHeight: 1.6, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>{renderMarkdown(t.text)}</div>
                   </div>
                 ))
               )}
