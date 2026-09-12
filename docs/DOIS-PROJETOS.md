@@ -121,10 +121,24 @@ utilizável.
 
 | Item | DEEP-OS | DEEP-OS-LOCAL |
 |------|---------|---------------|
-| Ambiente Python (venv) | `C:\DEEP-OS\venv\` | `C:\DEEP-OS-LOCAL\backend\venv\` |
+| Ambiente Python (venv) — **PC** | `C:\DEEP-OS\venv\` | `C:\DEEP-OS-LOCAL\backend\venv\` |
+| Ambiente Python (venv) — **VPS** | `/root/DEEP-OS/venv/` | (não existe — o LOCAL não vai para VPS) |
 | Inicialização | `START-TOTAL.bat` / deploy | `start-saas.bat` |
 | Portas | 8001 / 5175–5176 | 8001 / 5176 (+ chatbot 8010) |
 | Arquivos só dele | `RECUPERAR-VPS.md` | `README-LOCAL.md`, `chatbot-server/`, `generated/` |
+
+> ### ⚠️ O venv fica em pastas DIFERENTES — e isso já causou comando errado
+>
+> | Onde | Caminho do Python |
+> |------|-------------------|
+> | DEEP-OS no PC | `C:\DEEP-OS\venv\Scripts\python.exe` |
+> | **DEEP-OS na VPS** | `/root/DEEP-OS/venv/bin/python` |
+> | DEEP-OS-LOCAL no PC | `C:\DEEP-OS-LOCAL\backend\venv\Scripts\python.exe` |
+>
+> Repare: no gêmeo o venv está dentro de **`backend/`**; no principal, na **raiz**.
+> Um comando como `cd /root/DEEP-OS/backend && ./venv/bin/python …` **falha** com
+> "No such file or directory" — foi exatamente o que aconteceu. Na VPS, use
+> `/root/DEEP-OS/venv/bin/python` (caminho absoluto, sem ambiguidade).
 
 O venv em pastas diferentes é uma armadilha real: o `tests-manual/run_all.py`
 procurava só em `<raiz>/venv` e, no LOCAL, a suíte falhava na largada dizendo que
