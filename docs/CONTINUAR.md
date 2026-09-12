@@ -119,6 +119,64 @@ Causa provável: em `JarvisPage.tsx`, o evento `error` faz
 `fullAnswer += '\n\nErro: ...'`, e o `done` só substitui se `event.answer`
 existir. Se o erro chega depois do `done`, ele permanece.
 
+---
+
+### 5.2.1 ⚠️ MAIS GRAVE: o modelo INVENTA o ambiente quando não tem ferramentas
+
+**O que aconteceu (2026-09-12, 18:04).** O usuário escreveu `"ola groq"` — uma
+saudação, então **corretamente** o DEEP-OS não ofereceu ferramentas. O modelo
+respondeu sobre o ambiente com detalhes **completamente inventados**:
+
+> "sandbox de contêiner Linux... usuário não-root... sem acesso a GPUs físicas...
+> acesso externo à internet está bloqueado... /tmp ou /workspace"
+
+**Nada disso é verdade.** O real é: Ubuntu 26.04.1, hostname `srv1951736`,
+usuário `root`, 4 GB de RAM.
+
+**Por que é pior que os outros defeitos desta sessão.** Os anteriores faziam o
+modelo *não fazer* algo — visível e chato. Este faz o modelo **afirmar coisas
+falsas com confiança**, e o usuário pode acreditar. Um assistente que inventa
+fatos sobre o próprio ambiente é pior do que um que trava.
+
+**Correção recomendada (2 partes).**
+
+1. **Injetar o ambiente REAL no system prompt.** O backend já sabe tudo:
+   `platform.system()`, `platform.release()`, `platform.machine()`,
+   `socket.gethostname()`, `getpass.getuser()`, `os.cpu_count()`, total de RAM,
+   `os.getcwd()` e `is_headless()`. Um bloco
+   "AMBIENTE DE EXECUÇÃO (dados reais, verificados)" resolve o caso **sem
+   precisar de ferramenta** — e é a resposta certa para uma pergunta informativa.
+2. **Proibir invenção explicitamente.** Acrescentar ao system prompt: *"NUNCA
+   invente dados sobre o sistema, hardware, ambiente, rede ou sandbox. Se a
+   informação não estiver no bloco AMBIENTE DE EXECUÇÃO, diga que não sabe e
+   ofereça verificar."* Modelos preenchem lacunas com plausibilidade; a instrução
+   precisa ser explícita, como já foi necessário na saudação do Charon.
+
+**Onde mexer:** o construtor do system prompt do chat (a função que monta
+`system` em `backend/routes/chat.py`, e `backend/core/prompts.py`). No Charon,
+`_build_system_instruction()` em `backend/routes/voice_ws.py` já tem um bloco de
+modo headless — dá para reaproveitar a ideia.
+
+**Teste sugerido:** em `tests-manual/`, conferir que o system prompt gerado
+contém hostname, usuário e `is_headless()`, e que contém a proibição de inventar.
+Assim a regressão é pega por teste, não por print do usuário.
+
+---
+
+### 5.2.2 A cota gratuita do Gemini (5 req/min) inviabiliza tarefas
+
+Com `gemini-2.5-flash` no plano gratuito o limite é **5 requisições por minuto**,
+e o loop de tarefas faz **uma por passo**. Uma pergunta que executa 4 comandos
+estoura sozinha, e o usuário vê `429`.
+
+**Orientação ao usuário:** usar **Groq `openai/gpt-oss-120b`** para tarefas com
+ferramentas — é o padrão do DEEP-OS e não tem essa cota. Gemini segue bom para
+conversa.
+
+**Melhoria possível no código:** tratar `429` como "aguarde e tente de novo"
+(respeitando o `retryDelay` que a própria resposta traz) em vez de devolver o erro
+cru como texto na conversa.
+
 ### 5.3 Segurança (depende do usuário — não são bugs)
 
 - Trocar a **senha de root do VPS** (foi exposta em conversa).
