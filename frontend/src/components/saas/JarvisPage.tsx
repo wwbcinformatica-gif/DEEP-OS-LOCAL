@@ -451,8 +451,14 @@ const JarvisPage: React.FC = () => {
   // Preenchido pelos eventos `task_checklist` / `task_progress` do backend.
   const [passosPlano, setPassosPlano] = useState<PassoPlano[]>([]);
   // Inicio de cada ferramenta em execucao, para calcular a duracao no fim.
-  // Usa ref (nao estado) porque e dado de controle, nao de renderizacao.
-  const iniciosFerramentaRef = useRef<Record<string, number>>({});
+  //
+  // E uma LISTA por nome, nao um valor unico. O agente chama a MESMA ferramenta
+  // varias vezes seguidas (ex.: 4x `bash`), e com um valor unico cada chamada
+  // sobrescrevia o inicio da anterior — no fim, o tool_end encontrava o inicio
+  // recem-gravado da chamada seguinte e a duracao saia **0ms** em todas. Foi
+  // exatamente o que o usuario viu no painel.
+  // Com fila: guarda no fim (push) e consome do comeco (shift), na ordem.
+  const iniciosFerramentaRef = useRef<Record<string, number[]>>({});
 
   // ── Provedores: comuns do backend + personalizados do usuario ────────────
   //
@@ -888,7 +894,6 @@ const JarvisPage: React.FC = () => {
     // a duracao das ferramentas sairia errada.
     setPassosPlano([]);
     iniciosFerramentaRef.current = {};
-
     addProcess('thinking', 'Analisando pergunta...', `"${text.slice(0, 60)}${text.length > 60 ? '...' : ''}"`);
 
     const jarvisMsg: Message = {
@@ -965,8 +970,10 @@ const JarvisPage: React.FC = () => {
               } else if (event.type === 'tool_start') {
                 const toolName = event.tool || event.tool_name || 'desconhecida';
                 const params = typeof event.params === 'string' ? event.params : JSON.stringify(event.params || {}, null, 0);
-                // Guarda o inicio para medir a duracao quando chegar o tool_end.
-                iniciosFerramentaRef.current[toolName] = Date.now();
+                // Guarda o inicio numa FILA (a mesma ferramenta pode ser
+                // chamada varias vezes seguidas — ex.: 4x bash).
+                if (!iniciosFerramentaRef.current[toolName]) iniciosFerramentaRef.current[toolName] = [];
+                iniciosFerramentaRef.current[toolName].push(Date.now());
                 addProcess('tool_start', `${toolName}`, params.slice(0, 300), 'running');
                 // Detalhe aninhado (arvore): os parametros ficam um nivel abaixo
                 if (params && params !== '{}') {
@@ -975,9 +982,12 @@ const JarvisPage: React.FC = () => {
               } else if (event.type === 'tool_end') {
                 const toolName = event.tool || event.tool_name || '';
                 const result = typeof event.result === 'string' ? event.result : JSON.stringify(event.result || {}, null, 0);
-                const inicio = iniciosFerramentaRef.current[toolName];
+                // Consome o inicio MAIS ANTIGO pendente dessa ferramenta (fila),
+                // que e o da chamada que acabou de terminar.
+                const fila = iniciosFerramentaRef.current[toolName];
+                const inicio = fila && fila.length ? fila.shift() : undefined;
                 const duracao = inicio ? Date.now() - inicio : undefined;
-                delete iniciosFerramentaRef.current[toolName];
+                if (fila && fila.length === 0) delete iniciosFerramentaRef.current[toolName];
                 addProcess('tool_end', `${toolName}`, result.slice(0, 600), 'done', 0, duracao);
               } else if (event.type === 'thinking') {
                 // O backend manda "[Passo N/M] Executando: X" — mostra como
