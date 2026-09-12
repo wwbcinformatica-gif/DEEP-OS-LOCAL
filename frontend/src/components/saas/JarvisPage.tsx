@@ -63,13 +63,24 @@ const PROVIDERS = [
   { id: 'openrouter', label: 'OpenRouter (gratis/variados)', keyField: 'openrouter', models: [
     { id: 'openrouter/auto', label: 'Auto (melhor modelo)' },
     { id: 'meta-llama/llama-3.3-70b-instruct:free', label: 'Llama 3.3 70B (gratis)' },
+    { id: 'meta-llama/llama-3.1-8b-instruct:free', label: 'Llama 3.1 8B (gratis)' },
     { id: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+    { id: 'google/gemini-2.0-flash-exp:free', label: 'Gemini 2.0 Flash (gratis)' },
     { id: 'openai/gpt-4o-mini', label: 'GPT-4o Mini' },
+    { id: 'openai/gpt-4o', label: 'GPT-4o' },
     { id: 'anthropic/claude-3.5-sonnet', label: 'Claude 3.5 Sonnet' },
+    { id: 'anthropic/claude-3-haiku:free', label: 'Claude 3 Haiku (gratis)' },
+    { id: 'deepseek/deepseek-chat', label: 'DeepSeek Chat' },
+    { id: 'deepseek/deepseek-r1', label: 'DeepSeek R1' },
+    { id: 'qwen/qwen-2.5-72b-instruct', label: 'Qwen 2.5 72B' },
+    { id: 'mistralai/mistral-7b-instruct:free', label: 'Mistral 7B (gratis)' },
+    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
   ]},
   { id: 'groq', label: 'Groq (gratis/rapido)', keyField: 'groq', models: [
     { id: 'llama-3.3-70b-versatile', label: 'Llama 3.3 70B Versatile' },
     { id: 'llama-3.1-8b-instant', label: 'Llama 3.1 8B Instant' },
+    { id: 'gemma2-9b-it', label: 'Gemma 2 9B' },
+    { id: 'mixtral-8x7b-32768', label: 'Mixtral 8x7B' },
   ]},
   { id: 'mimo', label: 'MiMo', keyField: 'mimo', models: [
     { id: 'mimo-v2.5', label: 'MiMo V2.5' },
@@ -78,6 +89,12 @@ const PROVIDERS = [
     { id: 'glm-5.3-flash', label: 'GLM-5.3-Flash (novo)' },
     { id: 'glm-5.3', label: 'GLM-5.3' },
     { id: 'glm-5.2', label: 'GLM-5.2' },
+  ]},
+  { id: 'nvidia', label: 'NVIDIA NIM', keyField: 'nvidia', models: [
+    { id: 'nvidia/llama-3.1-nemotron-70b-instruct', label: 'Nemotron 70B' },
+    { id: 'nvidia/llama-3.3-70b-instruct', label: 'Llama 3.3 70B' },
+    { id: 'nvidia/mistral-nemo-12b-instruct', label: 'Mistral Nemo 12B' },
+    { id: 'nvidia/gemma-2-9b-it', label: 'Gemma 2 9B' },
   ]},
 ];
 
