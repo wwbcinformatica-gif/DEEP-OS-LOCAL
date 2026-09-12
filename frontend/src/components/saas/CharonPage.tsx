@@ -4,6 +4,8 @@ import {
   Conversation, TranscriptEntry,
   getConversations, createConversation, renameConversation, deleteConversation,
   getTranscripts, saveTranscripts, getActivityLog, saveActivityLog,
+  conversationToMarkdown, baixarTexto,
+  getWorkspaces, setConversationWorkspace, WORKSPACE_PADRAO,
   tenantGet, tenantSet, migrateLegacyData,
 } from './chatStorage';
 
@@ -292,7 +294,18 @@ const CharonPage: React.FC = () => {
   // Sem esta distincao o Charon ou nunca lembrava (como estava) ou lembrava
   // sempre — inclusive quando o usuario queria comecar do zero.
   const [restaurarHistorico, setRestaurarHistorico] = useState(false);
-  // Espelho em ref: o callback de conexao precisa do valor atual, e ele e criado
+  // ── Arvore do historico (mesma do Jarvis, a pedido do usuario) ───────────
+  // "no charon ter isso seria muito bom e tambem poder fazer download da session"
+  const [wsExpandidos, setWsExpandidos] = useState<Record<string, boolean>>({});
+  const [menuConversa, setMenuConversa] = useState<string | null>(null);
+  const [renomeando, setRenomeando] = useState<string | null>(null);
+  const [nomeTemp, setNomeTemp] = useState('');
+  const [workspaceAtivo, setWorkspaceAtivo] = useState<string>(
+    () => tenantGet('charon_workspace') || WORKSPACE_PADRAO
+  );
+  const [todosWorkspaces, setTodosWorkspaces] = useState<string[]>(() => getWorkspaces());
+  const [editandoWorkspace, setEditandoWorkspace] = useState(false);
+  const [novoWorkspace, setNovoWorkspace] = useState('');  // Espelho em ref: o callback de conexao precisa do valor atual, e ele e criado
   // uma vez (state ficaria congelado no valor da primeira renderizacao).
   const restaurarHistoricoRef = useRef(false);
   const lastAudioHashRef = useRef(0);
@@ -1018,8 +1031,9 @@ const CharonPage: React.FC = () => {
     if (!text.trim() || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
     // Auto-create conversation on first message
     if (!activeConvId) {
-      const conv = createConversation(text.trim());
+      const conv = createConversation(text.trim(), workspaceAtivo);
       setConversations(getConversations());
+      setTodosWorkspaces(getWorkspaces());
       setActiveConvId(conv.id);
     }
     wsRef.current.send(JSON.stringify({ type: 'text', text: text.trim() }));
@@ -1154,8 +1168,10 @@ const handleSaveIdentity = async () => {
   };
 
   const newConversation = () => {
-    const conv = createConversation();
+    // Nasce no workspace ativo (a raiz escolhida na arvore)
+    const conv = createConversation(undefined, workspaceAtivo);
     setConversations(getConversations());
+    setTodosWorkspaces(getWorkspaces());
     setActiveConvId(conv.id);
     setTranscripts([]);
     setActivityLog([]);
@@ -1184,8 +1200,9 @@ const handleSaveIdentity = async () => {
         setTranscripts(getTranscripts(next.id));
         setActivityLog(getActivityLog(next.id));
       } else {
-        const conv = createConversation();
+        const conv = createConversation(undefined, workspaceAtivo);
         setConversations(getConversations());
+        setTodosWorkspaces(getWorkspaces());
         setActiveConvId(conv.id);
         setTranscripts([]);
         setActivityLog([]);
@@ -1379,36 +1396,111 @@ const handleSaveIdentity = async () => {
                 {restaurarHistorico ? '\u21BA lembra da conversa' : 'sessao nova'}
               </span>
               <span style={{ fontSize: 9, color: '#666' }}>{transcripts.length}</span>
-              {showConvMenu && (
-                <div style={{
-                  position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 100,
-                  background: '#1a1a2e', border: '1px solid #333', borderRadius: 6,
-                  maxHeight: 200, overflowY: 'auto', boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-                }}>
-                  {conversations.map(conv => (
-                    <div
-                      key={conv.id}
-                      onClick={() => switchConversation(conv.id)}
-                      style={{
-                        padding: '6px 8px', cursor: 'pointer', display: 'flex',
-                        alignItems: 'center', gap: 6,
-                        background: conv.id === activeConvId ? 'rgba(180,120,255,0.15)' : 'transparent',
-                        borderBottom: '1px solid #222',
-                      }}
-                    >
-                      <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#b478ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
-                        {conv.name}
-                      </span>
-                      <span style={{ fontSize: 9, color: '#666', flexShrink: 0 }}>{formatConvTime(conv.updatedAt)}</span>
-                      <button onClick={(e) => handleRenameConversation(conv.id, e)} title="Renomear" style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 10, padding: '0 2px' }}>✎</button>
-                      <button onClick={(e) => handleDeleteConversation(conv.id, e)} title="Excluir" style={{ background: 'none', border: 'none', color: '#f44', cursor: 'pointer', fontSize: 10, padding: '0 2px' }}>✕</button>
+            </div>
+
+            {/* ── EXPLORER: workspaces → sessoes do Charon ──────────────────
+                Mesma arvore do Jarvis, a pedido do usuario. Aqui a "conversa"
+                e a SESSAO de voz: a setinha na raiz abre as sessoes, e o "..."
+                de cada uma permite renomear, excluir ou BAIXAR (exporta a
+                transcricao em .md). */}
+            <div style={{ borderBottom: '1px solid #1e1e1e', flexShrink: 0, maxHeight: '32vh', overflowY: 'auto' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 2px', fontSize: 8, color: '#5a5a5a', letterSpacing: 1, textTransform: 'uppercase' as const }}>
+                <span>workspaces</span>
+                <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{conversations.length}</span>
+                <button onClick={() => setEditandoWorkspace(v => !v)} title="Nova raiz (workspace)"
+                  style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 11, padding: '0 2px', lineHeight: 1 }}>+</button>
+              </div>
+
+              {editandoWorkspace && (
+                <div style={{ display: 'flex', gap: 4, padding: '2px 8px 4px' }}>
+                  <input value={novoWorkspace} onChange={e => setNovoWorkspace(e.target.value)} autoFocus
+                    onKeyDown={e => {
+                      if (e.key === 'Enter' && novoWorkspace.trim()) {
+                        const w = novoWorkspace.trim();
+                        setWorkspaceAtivo(w); tenantSet('charon_workspace', w);
+                        setTodosWorkspaces(prev => prev.includes(w) ? prev : [...prev, w].sort((a, b) => a.localeCompare(b, 'pt-BR')));
+                        setWsExpandidos(p => ({ ...p, [w]: true }));
+                        setNovoWorkspace(''); setEditandoWorkspace(false);
+                      }
+                      if (e.key === 'Escape') { setNovoWorkspace(''); setEditandoWorkspace(false); }
+                    }}
+                    placeholder="nome da raiz..."
+                    style={{ flex: 1, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 3, color: '#ccc', fontSize: 10, padding: '2px 5px', outline: 'none' }} />
+                </div>
+              )}
+
+              {todosWorkspaces.map(ws => {
+                const doWs = conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws);
+                if (doWs.length === 0 && ws !== workspaceAtivo) return null;
+                const aberto = wsExpandidos[ws] !== false;
+                return (
+                  <div key={ws}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', cursor: 'pointer' }}
+                      onClick={() => setWsExpandidos(p => ({ ...p, [ws]: !aberto }))} title={`Workspace: ${ws}`}>
+                      <span style={{ fontSize: 8, color: '#555', width: 8 }}>{aberto ? '\u25BE' : '\u25B8'}</span>
+                      <span style={{ fontSize: 10, color: ws === workspaceAtivo ? '#b478ff' : '#999', fontWeight: 600, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{ws}</span>
+                      <span style={{ fontSize: 8, color: '#444' }}>{doWs.length}</span>
                     </div>
-                  ))}
-                  {conversations.length === 0 && (
-                    <div style={{ padding: '8px', textAlign: 'center', color: '#666', fontSize: 11 }}>
-                      Nenhuma conversa ainda
-                    </div>
-                  )}
+
+                    {aberto && doWs.map(conv => (
+                      <div key={conv.id}>
+                        <div style={{
+                          display: 'flex', alignItems: 'center', gap: 3, padding: '2px 8px 2px 20px',
+                          background: conv.id === activeConvId ? 'rgba(180,120,255,0.12)' : 'transparent',
+                          borderLeft: conv.id === activeConvId ? '2px solid #b478ff' : '2px solid transparent',
+                        }}>
+                          {renomeando === conv.id ? (
+                            <input value={nomeTemp} onChange={e => setNomeTemp(e.target.value)} autoFocus
+                              onClick={e => e.stopPropagation()}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  if (nomeTemp.trim()) { renameConversation(conv.id, nomeTemp.trim()); setConversations(getConversations()); }
+                                  setRenomeando(null);
+                                }
+                                if (e.key === 'Escape') setRenomeando(null);
+                              }}
+                              onBlur={() => setRenomeando(null)}
+                              style={{ flex: 1, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 3, color: '#ccc', fontSize: 10, padding: '1px 4px', outline: 'none' }} />
+                          ) : (
+                            <>
+                              <span onClick={() => switchConversation(conv.id)} title={conv.name}
+                                style={{ flex: 1, fontSize: 10, color: conv.id === activeConvId ? '#b478ff' : '#bbb', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                                {conv.name}
+                              </span>
+                              <span style={{ fontSize: 8, color: '#3a3a3a', flexShrink: 0 }}>{formatConvTime(conv.updatedAt)}</span>
+                              <button onClick={(e) => { e.stopPropagation(); setMenuConversa(menuConversa === conv.id ? null : conv.id); }}
+                                title="Opcoes"
+                                style={{ background: 'none', border: 'none', color: menuConversa === conv.id ? '#b478ff' : '#555', cursor: 'pointer', fontSize: 12, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>{'\u22EF'}</button>
+                            </>
+                          )}
+                        </div>
+
+                        {menuConversa === conv.id && renomeando !== conv.id && (
+                          <div style={{ display: 'flex', gap: 6, padding: '3px 8px 3px 30px', background: 'rgba(255,255,255,0.02)' }}>
+                            <button onClick={() => { setRenomeando(conv.id); setNomeTemp(conv.name); setMenuConversa(null); }}
+                              style={{ background: 'none', border: 'none', color: '#c9a6ff', cursor: 'pointer', fontSize: 9, padding: 0 }}>{'\u270E'} Renomear</button>
+                            <button onClick={(e) => { setMenuConversa(null); handleDeleteConversation(conv.id, e); }}
+                              style={{ background: 'none', border: 'none', color: '#f77', cursor: 'pointer', fontSize: 9, padding: 0 }}>{'\u2715'} Excluir</button>
+                            {/* Download da SESSAO — pedido do usuario. Exporta a
+                                transcricao de voz inteira em Markdown. */}
+                            <button onClick={() => {
+                              const md = conversationToMarkdown(conv.id, conv.name);
+                              if (!md) { alert('Esta sessao ainda nao tem transcricao para baixar.'); return; }
+                              baixarTexto(conv.name, md);
+                              addActivity('Sessao exportada', `${md.length} caracteres em Markdown`);
+                              setMenuConversa(null);
+                            }} style={{ background: 'none', border: 'none', color: '#7c9', cursor: 'pointer', fontSize: 9, padding: 0 }}>{'\u2B07'} Baixar sessao</button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })}
+
+              {conversations.length === 0 && !editandoWorkspace && (
+                <div style={{ padding: '2px 8px 6px', fontSize: 9, color: '#4a4a4a', lineHeight: 1.5 }}>
+                  Nenhuma sessao ainda. O historico aparece aqui conforme voce fala com o Charon.
                 </div>
               )}
             </div>

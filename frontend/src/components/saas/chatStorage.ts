@@ -241,13 +241,18 @@ export function conversationToMarkdown(
   nome: string,
 ): string {
   const msgs = getMessages(convId);
-  if (msgs.length === 0) return '';
+  const transcricoes = getTranscripts(convId);
+  // O Charon NAO tem "mensagens de chat": a conversa dele e a TRANSCRICAO de
+  // voz. Exigir mensagens aqui fazia o download da sessao do Charon falhar com
+  // "sem mensagens salvas", mesmo com a conversa inteira transcrita na tela.
+  if (msgs.length === 0 && transcricoes.length === 0) return '';
 
   const quando = new Date().toLocaleString('pt-BR');
+  const total = msgs.length + transcricoes.length;
   const linhas: string[] = [
     `# ${nome || 'Conversa'}`,
     '',
-    `_Exportado do DEEP-OS em ${quando} — ${msgs.length} mensagens_`,
+    `_Exportado do DEEP-OS em ${quando} — ${total} registros_`,
     '',
     '---',
     '',
@@ -259,14 +264,19 @@ export function conversationToMarkdown(
     linhas.push(`## ${quem} — ${hora}`, '', m.content, '');
   }
 
-  // Os transcripts de voz (Charon) entram como anexo quando existirem
-  const transcricoes = getTranscripts(convId);
+  // Transcricao de voz (Charon). Vem DEPOIS das mensagens quando as duas
+  // existem, e como conteudo principal quando e a unica coisa que ha.
   if (transcricoes.length > 0) {
-    linhas.push('---', '', '## Transcricao de voz', '');
+    linhas.push(
+      msgs.length > 0 ? '---' : '',
+      msgs.length > 0 ? '' : '',
+      '## Transcricao de voz (Charon)',
+      '',
+    );
     for (const t of transcricoes) {
-      linhas.push(`- **${t.speaker === 'user' ? 'Voce' : 'Charon'}** (${t.time}): ${t.text}`);
+      const quem = t.speaker === 'user' ? 'Voce' : 'Charon';
+      linhas.push(`**${quem}** (${t.time})`, '', t.text, '');
     }
-    linhas.push('');
   }
 
   return linhas.join('\n');

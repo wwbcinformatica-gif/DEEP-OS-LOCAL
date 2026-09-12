@@ -177,9 +177,12 @@ check("fontSize: 9" in trecho_chip,
 check("conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws)" in jarvis,
       "a lista agrupa as conversas por workspace",
       "a lista continua solida, sem agrupamento")
-check("ws.toUpperCase()" in jarvis,
-      "o cabecalho da raiz e discreto (caixa alta, cinza)",
-      "o cabecalho da raiz nao segue o padrao discreto")
+check("ws.toUpperCase()" not in jarvis,
+      "o nome da raiz aparece como o usuario digitou (nao gritado em caixa alta)",
+      "o nome do workspace e forcado para caixa alta")
+check("fontSize: 10, color: ws === workspaceAtivo" in jarvis,
+      "a raiz tem estilo discreto (fonte pequena, cinza quando inativa)",
+      "a raiz nao segue o padrao discreto")
 # Conversa nova precisa herdar a raiz ativa
 check("createConversation(undefined, workspaceAtivo)" in jarvis,
       "conversa nova nasce no workspace ativo",
@@ -222,21 +225,66 @@ check(re.search(r"pularCarregamentoRef\.current = null", jarvis) is not None,
       "o aviso nunca e limpo — trocar de conversa depois nao carregaria nada")
 
 print()
-print("=== 7. O menu explica o mecanismo (queixa: 'confuso de entender') ===")
-# "+" (esquerda) e workspace (direita) pareciam se anular. A explicacao fica
-# dentro da propria lista, onde a duvida acontece.
-check("abre uma conversa" in jarvis and "escolhe o" in jarvis,
-      "a lista explica o que o '+' e o workspace fazem",
-      "a lista nao explica o mecanismo — o usuario continua sem entender")
-check("independentes" in jarvis,
-      "deixa explicito que as duas coisas sao independentes",
-      "nao fica claro que trocar de workspace nao apaga conversa")
-check("restaura" in jarvis,
-      "explica que clicar numa conversa RESTAURA ela",
-      "nao explica que clicar restaura a conversa")
-check("nao apaga nenhuma conversa do historico" in jarvis,
-      "o '+' avisa que criar conversa nova nao apaga nada",
-      "o '+' nao avisa que nao apaga o historico")
+print("=== 7. Arvore do historico (explorer estilo VS Code) ===")
+# Pedido: "no sidebar abaixo do menu jarvis aparecer como se fosse uma raiz
+# explorer com os workspaces e em seguida uma setinha para expandir todos os
+# historicos e do lado de cada historico tres pontos quando clicar poder
+# renomear ou deletar, deixar mais completo".
+#
+# Antes era um dropdown que abria e fechava (sumia a cada clique). A lista que
+# existia DENTRO do dropdown foi removida: manter as duas confundia.
+check("wsExpandidos" in jarvis,
+      "a arvore guarda quais workspaces estao expandidos",
+      "nao ha estado de expansao — a setinha nao funcionaria")
+check("u25BE" in jarvis and "u25B8" in jarvis,
+      "a raiz usa seta de expandir",
+      "a raiz nao tem seta de expandir")
+check("menuConversa" in jarvis,
+      "cada conversa tem estado de menu aberto",
+      "nao ha menu por conversa")
+check("u22EF" in jarvis,
+      "o botao de opcoes e o de tres pontos",
+      "nao ha botao de tres pontos")
+check("Renomear" in jarvis, "o menu da conversa permite Renomear",
+      "nao da para renomear pela arvore")
+check("Excluir" in jarvis, "o menu da conversa permite Excluir",
+      "nao da para excluir pela arvore")
+check("Baixar" in jarvis, "o menu da conversa permite Baixar",
+      "nao da para baixar pela arvore")
+check("vive na arvore (explorer) acima" in jarvis,
+      "a lista duplicada do dropdown foi removida (evita confusao)",
+      "a conversa aparece em dois lugares com acoes diferentes")
+
+print()
+print("=== 7.1 O Charon tem a MESMA arvore + download da sessao ===")
+CHARON = RAIZ / "frontend" / "src" / "components" / "saas" / "CharonPage.tsx"
+charon = CHARON.read_text(encoding="utf-8")
+check("wsExpandidos" in charon, "o Charon tem a arvore expandivel",
+      "o Charon nao tem a arvore")
+check("menuConversa" in charon, "o Charon tem o menu por sessao",
+      "o Charon nao tem o menu por sessao")
+check("Baixar sessao" in charon,
+      "o Charon permite BAIXAR a sessao",
+      "o Charon nao permite baixar a sessao")
+check("conversationToMarkdown" in charon,
+      "o download da sessao usa o mesmo exportador",
+      "o download nao usa o exportador de Markdown")
+check("workspaceAtivo" in charon,
+      "o Charon agrupa as sessoes por workspace",
+      "o Charon nao agrupa por workspace")
+check("charon_workspace" in charon,
+      "o workspace do Charon e lembrado entre sessoes",
+      "o workspace do Charon se perde ao recarregar")
+
+# O exportador precisa funcionar para SESSAO DE VOZ (sem mensagens de chat)
+m_exp = re.search(r"export function conversationToMarkdown\(.*?\n\}", storage, re.S)
+corpo_exp = m_exp.group(0) if m_exp else ""
+check("msgs.length === 0 && transcricoes.length === 0" in corpo_exp,
+      "o exportador aceita conversa SO com transcricao (caso do Charon)",
+      "exige mensagens de chat — o download da sessao do Charon falharia sempre")
+check("Transcricao de voz (Charon)" in corpo_exp,
+      "a transcricao entra com titulo proprio no arquivo",
+      "a transcricao nao e identificada no arquivo")
 
 print()
 print("=== 8. Limpar tudo: local + servidor (com as travas certas) ===")

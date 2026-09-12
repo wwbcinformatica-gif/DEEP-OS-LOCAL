@@ -540,6 +540,22 @@ const JarvisPage: React.FC = () => {
   const [editandoWorkspace, setEditandoWorkspace] = useState(false);
   const [novoWorkspace, setNovoWorkspace] = useState('');
 
+  // ── Arvore do historico (estilo explorer do VS Code) ─────────────────────
+  //
+  // PEDIDO DO USUARIO: "no sidebar abaixo do menu jarvis aparecer como se fosse
+  // uma raiz explorer com os workspaces e em seguida uma setinha para expandir
+  // todos os historicos e do lado de cada historico tres pontos quando clicar
+  // poder renomear ou deletar, deixar mais completo".
+  //
+  // Antes a navegacao era um dropdown que abria e fechava: sumia a cada clique e
+  // nao deixava ver a estrutura. Agora e uma arvore fixa na lateral.
+  const [wsExpandidos, setWsExpandidos] = useState<Record<string, boolean>>({});
+  // Qual conversa esta com o menu "..." aberto (so uma por vez).
+  const [menuConversa, setMenuConversa] = useState<string | null>(null);
+  // Qual conversa esta sendo renomeada, e o texto em edicao.
+  const [renomeando, setRenomeando] = useState<string | null>(null);
+  const [nomeTemp, setNomeTemp] = useState('');
+
   useEffect(() => {
     if (!activeConvId) return;
     // Troca feita por nos (primeira mensagem criando a conversa): nao ha o que
@@ -1416,38 +1432,17 @@ const JarvisPage: React.FC = () => {
                     claro que sao duas coisas independentes. */}
                 <div style={{ padding: '6px 8px', borderBottom: '1px solid #222', marginBottom: 2 }}>
                   <div style={{ fontSize: 9, color: '#7a7a7a', lineHeight: 1.5 }}>
-                    <b style={{ color: '#00d9ff' }}>+</b> abre uma conversa <b>nova</b> (limpa).
-                    {' '}<b style={{ color: '#00d9ff' }}>◰</b> escolhe o <b>workspace</b> — a pasta
-                    onde as conversas se agrupam.
+                    A navegacao agora fica na <b style={{ color: '#9ecbff' }}>arvore acima</b>:
+                    cada workspace abre com a setinha e cada conversa tem <b style={{ color: '#9ecbff' }}>⋯</b>
+                    para <b>renomear</b>, <b>excluir</b> ou <b>baixar</b>.
                     <br />
-                    As duas coisas sao <b>independentes</b>: trocar de workspace nao apaga nada;
-                    clicar numa conversa abaixo <b>restaura</b> ela.
+                    Aqui embaixo ficam apenas as acoes gerais.
                   </div>
                 </div>
-                {/* Agrupado por workspace, com a arvore discreta: a raiz em
-                    caixa alta e cinza, as conversas indentadas abaixo dela.
-                    Assim a lista fica organizada sem virar uma tela de pastas. */}
-                {todosWorkspaces.map(ws => {
-                  const doWs = conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws);
-                  if (doWs.length === 0) return null;
-                  return (
-                    <div key={ws}>
-                      <div style={{ fontSize: 8, color: '#4a4a4a', letterSpacing: 1, padding: '4px 6px 2px', display: 'flex', alignItems: 'center', gap: 4 }}>
-                        <span>{'\u25F0'}</span><span>{ws.toUpperCase()}</span>
-                        <span style={{ marginLeft: 'auto', opacity: 0.6 }}>{doWs.length}</span>
-                      </div>
-                      {doWs.map(conv => (
-                        <div key={conv.id} onClick={() => switchConversation(conv.id)} style={{ ...s.convItem, paddingLeft: 14, background: conv.id === activeConvId ? 'rgba(0,217,255,0.15)' : 'transparent' }}>
-                          <span style={{ color: '#2a2a2a', marginRight: 3 }}>{'\u2514'}</span>
-                          <span style={{ flex: 1, fontSize: 11, color: conv.id === activeConvId ? '#00d9ff' : '#ccc', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>{conv.name}</span>
-                          <span style={{ fontSize: 9, color: '#666' }}>{formatConvTime(conv.updatedAt)}</span>
-                          <button onClick={(e) => handleRenameConversation(conv.id, e)} style={s.convActionBtn}>{'\u270E'}</button>
-                          <button onClick={(e) => handleDeleteConversation(conv.id, e)} style={{ ...s.convActionBtn, color: '#f44' }}>{'\u2715'}</button>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })}
+                {/* A lista de conversas que ficava aqui foi REMOVIDA: agora ela
+                    vive na arvore (explorer) acima. Manter as duas confundia —
+                    o usuario via a mesma conversa em dois lugares com acoes
+                    diferentes. Aqui sobraram as acoes gerais. */}
 
                 {/* Limpar tudo: apaga as conversas (local) E o historico que o
                     servidor usa como contexto. Fica no fim da lista, discreto,
@@ -1558,6 +1553,128 @@ const JarvisPage: React.FC = () => {
                 )}
               </select>
             </div>
+          </div>
+
+          {/* ── EXPLORER: workspaces → historicos ─────────────────────────
+              Estrutura de arvore, como o explorer do VS Code:
+                ▸ DEEP-OS (3)      ← workspace (raiz) — clique expande
+                    conversa 1     ← clique abre; "..." renomeia/exclui
+                    conversa 2
+              Fica fixa na lateral: da para ver a organizacao sem abrir nada. */}
+          <div style={{
+            borderBottom: '1px solid #1e1e1e', flexShrink: 0,
+            maxHeight: '38vh', overflowY: 'auto',
+          }}>
+            <div style={{
+              display: 'flex', alignItems: 'center', gap: 4,
+              padding: '4px 8px 2px', fontSize: 8, color: '#5a5a5a',
+              letterSpacing: 1, textTransform: 'uppercase' as const,
+            }}>
+              <span>workspaces</span>
+              <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{conversations.length}</span>
+              <button onClick={() => setEditandoWorkspace(v => !v)}
+                title="Nova raiz (workspace)"
+                style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 11, padding: '0 2px', lineHeight: 1 }}>+</button>
+            </div>
+
+            {/* Criar workspace */}
+            {editandoWorkspace && (
+              <div style={{ display: 'flex', gap: 4, padding: '2px 8px 4px' }}>
+                <input value={novoWorkspace} onChange={e => setNovoWorkspace(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && novoWorkspace.trim()) {
+                      const w = novoWorkspace.trim();
+                      setWorkspaceAtivo(w); tenantSet('jarvis_workspace', w);
+                      setTodosWorkspaces(prev => prev.includes(w) ? prev : [...prev, w].sort((a, b) => a.localeCompare(b, 'pt-BR')));
+                      setWsExpandidos(p => ({ ...p, [w]: true }));
+                      setNovoWorkspace(''); setEditandoWorkspace(false);
+                    }
+                    if (e.key === 'Escape') { setNovoWorkspace(''); setEditandoWorkspace(false); }
+                  }}
+                  placeholder="nome da raiz..." autoFocus
+                  style={{ flex: 1, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 3, color: '#ccc', fontSize: 10, padding: '2px 5px', outline: 'none' }} />
+              </div>
+            )}
+
+            {todosWorkspaces.map(ws => {
+              const doWs = conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws);
+              // Mostra a raiz mesmo vazia se for a ativa (para o usuario nao
+              // achar que a raiz nova nao foi criada).
+              if (doWs.length === 0 && ws !== workspaceAtivo) return null;
+              const aberto = wsExpandidos[ws] !== false; // padrao: expandido
+              return (
+                <div key={ws}>
+                  {/* Raiz (workspace) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', cursor: 'pointer' }}
+                    onClick={() => setWsExpandidos(p => ({ ...p, [ws]: !aberto }))}
+                    title={`Workspace: ${ws}`}>
+                    <span style={{ fontSize: 8, color: '#555', width: 8 }}>{aberto ? '\u25BE' : '\u25B8'}</span>
+                    <span style={{ fontSize: 10, color: ws === workspaceAtivo ? '#00d9ff' : '#999', fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const, flex: 1 }}>{ws}</span>
+                    <span style={{ fontSize: 8, color: '#444' }}>{doWs.length}</span>
+                  </div>
+
+                  {/* Historicos da raiz */}
+                  {aberto && doWs.map(conv => (
+                    <div key={conv.id}>
+                      <div style={{
+                        display: 'flex', alignItems: 'center', gap: 3,
+                        padding: '2px 8px 2px 20px',
+                        background: conv.id === activeConvId ? 'rgba(0,217,255,0.12)' : 'transparent',
+                        borderLeft: conv.id === activeConvId ? '2px solid #00d9ff' : '2px solid transparent',
+                      }}>
+                        {renomeando === conv.id ? (
+                          <input value={nomeTemp} onChange={e => setNomeTemp(e.target.value)} autoFocus
+                            onClick={e => e.stopPropagation()}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') {
+                                if (nomeTemp.trim()) { renameConversation(conv.id, nomeTemp.trim()); setConversations(getConversations()); }
+                                setRenomeando(null);
+                              }
+                              if (e.key === 'Escape') setRenomeando(null);
+                            }}
+                            onBlur={() => setRenomeando(null)}
+                            style={{ flex: 1, background: '#0d0d0d', border: '1px solid #2a2a2a', borderRadius: 3, color: '#ccc', fontSize: 10, padding: '1px 4px', outline: 'none' }} />
+                        ) : (
+                          <>
+                            <span onClick={() => switchConversation(conv.id)}
+                              title={conv.name}
+                              style={{ flex: 1, fontSize: 10, color: conv.id === activeConvId ? '#00d9ff' : '#bbb', cursor: 'pointer', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const }}>
+                              {conv.name}
+                            </span>
+                            <span style={{ fontSize: 8, color: '#3a3a3a', flexShrink: 0 }}>{formatConvTime(conv.updatedAt)}</span>
+                            {/* Tres pontos: renomear / excluir */}
+                            <button onClick={(e) => { e.stopPropagation(); setMenuConversa(menuConversa === conv.id ? null : conv.id); }}
+                              title="Opcoes"
+                              style={{ background: 'none', border: 'none', color: menuConversa === conv.id ? '#00d9ff' : '#555', cursor: 'pointer', fontSize: 12, padding: '0 2px', lineHeight: 1, flexShrink: 0 }}>{'\u22EF'}</button>
+                          </>
+                        )}
+                      </div>
+
+                      {/* Menu da conversa */}
+                      {menuConversa === conv.id && renomeando !== conv.id && (
+                        <div style={{ display: 'flex', gap: 6, padding: '3px 8px 3px 30px', background: 'rgba(255,255,255,0.02)' }}>
+                          <button onClick={() => { setRenomeando(conv.id); setNomeTemp(conv.name); setMenuConversa(null); }}
+                            style={{ background: 'none', border: 'none', color: '#9ecbff', cursor: 'pointer', fontSize: 9, padding: 0 }}>{'\u270E'} Renomear</button>
+                          <button onClick={(e) => { setMenuConversa(null); handleDeleteConversation(conv.id, e); }}
+                            style={{ background: 'none', border: 'none', color: '#f77', cursor: 'pointer', fontSize: 9, padding: 0 }}>{'\u2715'} Excluir</button>
+                          <button onClick={() => {
+                            const md = conversationToMarkdown(conv.id, conv.name);
+                            if (!md) { alert('Esta conversa nao tem mensagens salvas.'); return; }
+                            baixarTexto(conv.name, md); setMenuConversa(null);
+                          }} style={{ background: 'none', border: 'none', color: '#7c9', cursor: 'pointer', fontSize: 9, padding: 0 }}>{'\u2B07'} Baixar</button>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })}
+
+            {conversations.length === 0 && !editandoWorkspace && (
+              <div style={{ padding: '2px 8px 6px', fontSize: 9, color: '#4a4a4a', lineHeight: 1.5 }}>
+                Nenhuma conversa ainda. O historico aparece aqui conforme voce conversa.
+              </div>
+            )}
           </div>
 
           <div style={s.messagesArea}>
