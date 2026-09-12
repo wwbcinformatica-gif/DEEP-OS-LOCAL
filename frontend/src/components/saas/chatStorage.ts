@@ -247,41 +247,51 @@ export function conversationToMarkdown(
 ): string {
   const msgs = getMessages(convId);
   const transcricoes = getTranscripts(convId);
+  const atividades = getActivityLog(convId);
   // O Charon NAO tem "mensagens de chat": a conversa dele e a TRANSCRICAO de
-  // voz. Exigir mensagens aqui fazia o download da sessao do Charon falhar com
-  // "sem mensagens salvas", mesmo com a conversa inteira transcrita na tela.
-  if (msgs.length === 0 && transcricoes.length === 0) return '';
+  // voz (painel direito) + o LOG DE ATIVIDADES (painel central, onde ficam as
+  // ferramentas, buscas e o trabalho entregue). Exigir mensagens fazia o
+  // download falhar; exportar so a transcricao deixava o painel central de fora
+  // — que era exatamente a queixa do usuario.
+  if (msgs.length === 0 && transcricoes.length === 0 && atividades.length === 0) return '';
 
   const quando = new Date().toLocaleString('pt-BR');
-  const total = msgs.length + transcricoes.length;
   const linhas: string[] = [
     `# ${nome || 'Conversa'}`,
     '',
-    `_Exportado do DEEP-OS em ${quando} — ${total} registros_`,
+    `_Exportado do DEEP-OS em ${quando}_`,
     '',
     '---',
     '',
   ];
 
-  for (const m of msgs) {
-    const hora = new Date(m.timestamp).toLocaleString('pt-BR');
-    const quem = m.role === 'user' ? 'Voce' : 'Jarvis';
-    linhas.push(`## ${quem} — ${hora}`, '', m.content, '');
+  if (msgs.length > 0) {
+    linhas.push('## Conversa', '');
+    for (const m of msgs) {
+      const hora = new Date(m.timestamp).toLocaleString('pt-BR');
+      const quem = m.role === 'user' ? 'Voce' : 'Jarvis';
+      linhas.push(`### ${quem} — ${hora}`, '', m.content, '');
+    }
   }
 
-  // Transcricao de voz (Charon). Vem DEPOIS das mensagens quando as duas
-  // existem, e como conteudo principal quando e a unica coisa que ha.
   if (transcricoes.length > 0) {
-    linhas.push(
-      msgs.length > 0 ? '---' : '',
-      msgs.length > 0 ? '' : '',
-      '## Transcricao de voz (Charon)',
-      '',
-    );
+    // ⚠️ NAO JUNTAR OS PEDACOS. O formato empilhado (uma entrada por pedaco,
+    // como o Gemini Live envia) e o que o usuario quer e validou depois de
+    // varios dias de ajuste. Aqui vai exatamente o que ele ve na tela.
+    linhas.push('## Transcricao de voz (Charon) — painel direito', '');
     for (const t of transcricoes) {
       const quem = t.speaker === 'user' ? 'Voce' : 'Charon';
       linhas.push(`**${quem}** (${t.time})`, '', t.text, '');
     }
+  }
+
+  if (atividades.length > 0) {
+    linhas.push('---', '', '## Atividades — painel central (ferramentas, buscas e resultados)', '');
+    for (const a of atividades) {
+      const quem = a.speaker === 'user' ? 'Voce' : a.speaker === 'system' ? 'Sistema' : 'Charon';
+      linhas.push(`- **${quem}** (${a.time}): ${a.text}`);
+    }
+    linhas.push('');
   }
 
   return linhas.join('\n');

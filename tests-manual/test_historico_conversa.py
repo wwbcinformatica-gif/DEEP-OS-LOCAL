@@ -394,6 +394,51 @@ check("usados.size === 0" in corpo_ws,
       "a regra de quando mostrar 'Geral' nao esta clara")
 
 print()
+print("=== 11. Download da sessao do Charon: os DOIS paineis ===")
+# Pedido: "ao clicar em baixar ele baixa a secao do painel direito aquele que as
+# mensagens segue empilhada; eu quero o contexto do painel central tambem, ou
+# ele baixar as duas".
+#
+# Painel direito  = transcricao de voz (transcripts)
+# Painel central  = atividades (ferramentas, buscas e o trabalho entregue)
+m_exp = re.search(r"export function conversationToMarkdown\(.*?\n\}", storage, re.S)
+corpo_exp = m_exp.group(0) if m_exp else ""
+check(bool(corpo_exp), "isolei conversationToMarkdown", "nao achei a funcao")
+check("getActivityLog(convId)" in corpo_exp,
+      "o export inclui o painel CENTRAL (atividades)",
+      "o painel central continua de fora do download — era a queixa")
+check("atividades.length > 0" in corpo_exp,
+      "as atividades sao escritas quando existem",
+      "as atividades nao entram no arquivo")
+check("getTranscripts(convId)" in corpo_exp,
+      "o export inclui o painel direito (transcricao)",
+      "a transcricao saiu do export")
+check("painel central" in corpo_exp and "painel direito" in corpo_exp,
+      "o arquivo identifica de qual painel cada secao veio",
+      "as secoes nao estao identificadas — fica confuso ao estudar")
+
+# ── NAO MEXER NO FORMATO EMPILHADO ──────────────────────────────────────────
+# O usuario: "é neste formato que funcionou empilhando as conversas, passamos
+# varios dias para descobrir que assim empilhado é melhor, não mexa neste
+# formato". Eu havia juntado os pedacos por conta propria — inferencia minha,
+# nao pedido dele. Este teste impede que a juncao volte.
+check("juntarPedacosDeTranscricao" not in storage,
+      "NAO existe juncao de pedacos no chatStorage",
+      "a juncao voltou — o usuario pediu para NAO mexer no formato empilhado")
+check("empilharTranscript" not in charon,
+      "o Charon volta a EMPILHAR cada pedaco (formato validado pelo usuario)",
+      "o Charon esta juntando os pedacos — formato que o usuario quer preservado")
+check("setTranscripts(prev => [...prev, { speaker: 'user', text, time: now() }])" in charon,
+      "o pedaco do usuario e acrescentado como entrada propria",
+      "o append simples do usuario nao esta no formato original")
+check("setTranscripts(prev => [...prev, { speaker: 'charon', text, time: now() }])" in charon,
+      "o pedaco do Charon e acrescentado como entrada propria",
+      "o append simples do Charon nao esta no formato original")
+check("NAO JUNTAR OS PEDACOS" in charon and "NAO JUNTAR OS PEDACOS" in storage,
+      "ha aviso nos DOIS arquivos para nao juntar de novo",
+      "falta o aviso — alguem pode 'melhorar' isso outra vez")
+
+print()
 print("=" * 70)
 if falhas:
     print(f"RESULTADO: {len(falhas)} FALHA(S)")

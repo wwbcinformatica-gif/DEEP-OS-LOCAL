@@ -511,6 +511,16 @@ const CharonPage: React.FC = () => {
 
   const now = () => new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
+  // ⚠️ NAO JUNTAR OS PEDACOS DE TRANSCRICAO.
+  //
+  // Eu tentei "melhorar" isto juntando os pedacos do mesmo falante, achando que
+  // uma entrada por palavra era defeito. O USUARIO CORRIGIU: o formato
+  // EMPILHADO e o que funciona e foi assim que ficou bom depois de varios dias
+  // de ajuste. Nao mexer.
+  //
+  // (Mesma licao das outras: eu inferi um problema a partir do arquivo exportado
+  // em vez de perguntar. O pedido dele era o painel CENTRAL no download, nao
+  // mudar a transcricao.)
   const addUserTranscript = useCallback((text: string) => {
     setTranscripts(prev => [...prev, { speaker: 'user', text, time: now() }]);
   }, []);
