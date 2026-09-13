@@ -527,12 +527,23 @@ const JarvisPage: React.FC = () => {
     ollama: tenantGet('jarvis_gpu_ollama') !== 'false',
     llamacpp: tenantGet('jarvis_gpu_llamacpp') !== 'false',
   });
-  const textareaHeightRef = useRef(60);
-  const [textareaHeight, setTextareaHeight] = useState(60);
-  const rightPanelWidthRef = useRef(280);
-  const [rightPanelWidth, setRightPanelWidth] = useState(280);
+  // Altura do campo de chat e largura do painel direito.
+  //
+  // PEDIDO: "as larguras do campo do chat abaixo e painel direito em default
+  // pode deixar tambem igual o charon". Os PADROES ja eram os mesmos (campo 60px,
+  // painel 340px), mas faltava o que o Charon faz e o Jarvis nao fazia:
+  // PERSISTIR a escolha do usuario e RESTAURAR ao abrir. Sem isso, quem
+  // arrastava a divisoria perdia o ajuste a cada F5 — os dois pareciam
+  // diferentes mesmo com o mesmo padrao.
+  const textareaHeightRef = useRef(parseInt(tenantGet('jarvis_textarea_height') || '60'));
+  const [textareaHeight, setTextareaHeight] = useState(textareaHeightRef.current);
+  const rightPanelWidthRef = useRef(parseInt(tenantGet('jarvis_right_panel_width') || '340'));
+  const [rightPanelWidth, setRightPanelWidth] = useState(rightPanelWidthRef.current);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const processListRef = useRef<HTMLDivElement>(null);
+  // Container da arvore de conversas, para o botao "Continuar" rolar ate ela
+  // (as raizes comecam fechadas). Mesmo padrao do Charon.
+  const arvoreRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -1639,33 +1650,241 @@ const JarvisPage: React.FC = () => {
             </div>
           </div>
 
+
+          <div style={s.messagesArea}>
+            {messages.length === 0 ? (
+              // Mesmo tratamento que o Charon da na tela inicial: explica onde
+              // estao as duas escolhas, em vez de so dizer "pronto".
+              // PEDIDO: "no jarvis tem ficar igual charon o visual assim".
+              <div style={{ maxWidth: 380, margin: '30px auto 0', textAlign: 'left' }}>
+                <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600, color: '#7fe6ff' }}>
+                  Como voce quer comecar?
+                </p>
+                <p style={{ margin: '0 0 10px', fontSize: 12, opacity: 0.7, lineHeight: 1.6 }}>
+                  O Jarvis esta pronto para responder. Escolha o contexto ali no
+                  painel da direita.
+                </p>
+                <p style={{ margin: '0 0 6px', fontSize: 11.5, lineHeight: 1.6, opacity: 0.85 }}>
+                  <span style={{ color: '#7fe6ff', fontWeight: 600 }}>+ Novo chat</span>
+                  {' '}— conversa nova, sem contexto anterior.
+                </p>
+                <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.6, opacity: 0.85 }}>
+                  <span style={{ color: '#bbb', fontWeight: 600 }}>&#8635; Continuar</span>
+                  {' '}— abre as {conversations.length} conversas salvas. Escolha uma e o
+                  Jarvis continua de onde pararam.
+                </p>
+              </div>
+            ) : messages.map(msg => (
+              <div key={msg.id} style={{
+                marginBottom: 10, padding: '10px 14px', borderRadius: 8,
+                background: msg.role === 'user' ? 'rgba(0,217,255,0.06)' : 'rgba(180,120,255,0.04)',
+                borderLeft: `3px solid ${msg.role === 'user' ? '#00d9ff' : '#b478ff'}`,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                  <span style={{ fontSize: 13 }}>{msg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: msg.role === 'user' ? '#00d9ff' : '#b478ff' }}>
+                    {msg.role === 'user' ? 'Voce' : 'Jarvis'}
+                  </span>
+                  <span style={{ fontSize: 10, color: '#555', marginLeft: 'auto' }}>
+                    {msg.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                </div>
+                <div style={{ color: '#ddd', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 13, lineHeight: 1.7, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
+                  {renderMessageContent(msg.content)}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>{'\u258C'}</span>}
+                </div>
+              </div>
+            ))}
+            {isTyping && (
+              <div style={{ marginBottom: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(180,120,255,0.04)', borderLeft: '3px solid #b478ff' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                  <span style={{ fontSize: 13 }}>{'\uD83E\uDD16'}</span>
+                  <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff' }}>Jarvis</span>
+                </div>
+                <div style={{ display: 'flex', gap: 6, padding: '6px 0' }}>
+                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite' }} />
+                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.2s' }} />
+                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.4s' }} />
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div style={s.inputSection}>
+            <div onPointerDown={(e) => { e.preventDefault(); const startY = e.clientY; const startH = textareaHeightRef.current; const move = (ev: PointerEvent) => { const delta = startY - ev.clientY; textareaHeightRef.current = Math.max(36, Math.min(300, startH + delta));
+    setTextareaHeight(textareaHeightRef.current);
+    // Persiste igual ao Charon: sem isto o ajuste se perdia no F5.
+    tenantSet('jarvis_textarea_height', String(textareaHeightRef.current)); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ height: 6, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, margin: '2px 0' }}>
+              <div style={{ width: 40, height: 3, borderRadius: 2, background: '#444' }} />
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
+                placeholder={isListening ? 'Ouvindo...' : 'Digite sua mensagem...'}
+                style={{ ...s.textarea, height: textareaHeight, borderColor: isListening ? '#ef4444' : '#333' }}
+                disabled={isTyping} />
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
+                      {isListening ? '\u23F9' : '\uD83C\uDF99'}
+                    </button>
+                    <button onClick={() => { if (isSpeaking) stopSpeaking(); setAutoSpeakEnabled(!autoSpeakEnabled); }} style={{ ...s.iconBtn, background: autoSpeakEnabled ? '#0c0' : '#1a1a2e', color: autoSpeakEnabled ? '#fff' : '#666' }} title={autoSpeakEnabled ? 'Falante ON (clique para desativar)' : 'Falante OFF (clique para ativar)'}>
+                      {autoSpeakEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07'}
+                    </button>
+                    <button onClick={stopGeneration} disabled={!isTyping} style={{ ...s.iconBtn, background: isTyping ? '#ef4444' : '#1a1a2e', color: isTyping ? '#fff' : '#666', opacity: isTyping ? 1 : 0.4 }} title="Parar geracao">
+                      {'\u23F9'}
+                    </button>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
+                    <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
+                      {isTyping ? 'Processando...' : 'Jarvis ativo'}
+                    </span>
+                  </div>
+                </div>
+                <button style={s.sendBtn} onClick={handleSendMessage} disabled={!input.trim() || isTyping}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </button>
+              </div>
+              {/* Monitor de CPU / RAM / VRAM — ABAIXO DO CAMPO DE CHAT.
+                  PEDIDO FINAL do usuario: "reformulando abaixo do campo do chat".
+                  Antes ele ficava dentro da coluna dos botoes, encostado na barra
+                  vertical de arrastar, e a barra atrapalhava/era atrapalhada.
+                  Aqui vira uma FAIXA propria, abaixo de tudo, na largura do
+                  painel do chat — longe da divisoria e sem empurrar o botao de
+                  enviar. Reusa o componente unico (Jarvis, Charon e App). */}
+              <div style={{
+                borderTop: '1px solid #1a1a1a', paddingTop: 4, marginTop: 2,
+                display: 'flex', justifyContent: 'center',
+              }}>
+                <MiniMonitors />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div onPointerDown={(e) => { e.preventDefault(); const startX = e.clientX; const startW = rightPanelWidthRef.current; const move = (ev: PointerEvent) => { const delta = startX - ev.clientX; rightPanelWidthRef.current = Math.max(200, Math.min(620, startW + delta));
+    setRightPanelWidth(rightPanelWidthRef.current);
+    // Persiste igual ao Charon (e o teto subiu de 500 para 620: com a
+    // arvore dentro deste painel, 500 cortava os nomes das conversas).
+    tenantSet('jarvis_right_panel_width', String(rightPanelWidthRef.current)); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ width: 5, cursor: 'ew-resize', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: '#111' }}>
+          <div style={{ width: 3, height: 40, borderRadius: 2, background: '#333' }} />
+        </div>
+
+        {/* ── Painel de execucao (organizacao no estilo VS Code) ──────────────
+            Antes era uma lista PLANA de texto: cada evento virava um bloco
+            igual, sem hierarquia, sem duracao e sem o plano real. O usuario
+            descreveu como "o modelo fala que vai fazer e fica ali no plano".
+
+            Agora tem tres camadas, como o painel de tarefas do VS Code:
+              1. CABECALHO com contador de passos e barra de progresso geral;
+              2. PLANO — os passos que o BACKEND enviou (task_checklist /
+                 task_progress), cada um com estado proprio;
+              3. ATIVIDADE — a arvore cronologica: evento principal e, um nivel
+                 abaixo, parametros e resultado, com tempo de cada ferramenta. */}
+        <div style={{ ...s.rightPanel, width: rightPanelWidth }}>
+          {/* ── BARRA DE SESSAO ─────────────────────────────────────────────
+              Mesmo visual do Charon (pedido do usuario: "no jarvis tem ficar
+              igual charon o visual assim -> Nenhuma conversa escolhida /
+              sessao nova / 0"). Mostra QUAL conversa esta aberta, se o contexto
+              veio do historico e quantas mensagens tem — antes essa informacao
+              so existia na barra do painel esquerdo. */}
+          <div style={{ padding: '4px 8px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            <button
+              onClick={() => setShowConvMenu(!showConvMenu)}
+              style={{
+                flex: 1, background: 'none', border: 'none', color: '#ccc',
+                fontSize: 11, textAlign: 'left', cursor: 'pointer',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' as const,
+                padding: '2px 4px',
+              }}
+              title={activeConv?.name || 'Nenhuma conversa escolhida'}
+            >
+              {activeConv?.name || 'Nenhuma conversa escolhida'}
+            </button>
+            <span
+              title="Nesta conversa do Jarvis o historico sempre vai como contexto (o chat e continuo)."
+              style={{
+                fontSize: 8, padding: '1px 5px', borderRadius: 8, flexShrink: 0,
+                background: 'rgba(0,217,255,0.12)', color: '#7fe6ff',
+                border: '1px solid rgba(0,217,255,0.3)', whiteSpace: 'nowrap' as const,
+              }}
+            >
+              sessao nova
+            </span>
+            <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
+          </div>
+
+          {/* ── AS DUAS ESCOLHAS ───────────────────────────────────────────
+              Mesmos dois botoes do Charon, lado a lado e compactos. E o padrao
+              que o usuario validou: "+ Novo chat" (sessao nova) e "Continuar"
+              (abre a arvore para escolher uma conversa salva). */}
+          <div style={{ display: 'flex', gap: 6, padding: '6px 8px 2px', flexShrink: 0 }}>
+            <button
+              onClick={newConversation}
+              title="Comecar uma conversa nova (nao apaga nenhuma do historico)"
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
+                background: 'rgba(0,217,255,0.07)',
+                border: '1px solid rgba(0,217,255,0.25)',
+                color: '#7fe6ff', fontSize: 10, fontWeight: 600,
+              }}>
+              <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
+              <span>Novo chat</span>
+            </button>
+            <button
+              onClick={() => {
+                // Abre todas as raizes que tem conversa e leva a arvore para a
+                // vista. Mesma funcao que o botao equivalente faz no Charon.
+                const todas: Record<string, boolean> = {};
+                for (const c of conversations) todas[c.workspace || WORKSPACE_PADRAO] = true;
+                setWsExpandidos(todas);
+                try { arvoreRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch { /* opcional */ }
+              }}
+              title={`Abrir as ${conversations.length} conversas salvas`}
+              style={{
+                flex: 1, display: 'flex', alignItems: 'center', gap: 5,
+                padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid #2e2e2e',
+                color: '#bbb', fontSize: 10, fontWeight: 600,
+              }}>
+              <span style={{ fontSize: 11, lineHeight: 1 }}>&#8635;</span>
+              <span>Continuar</span>
+              {conversations.length > 0 && (
+                <span style={{ marginLeft: 'auto', fontSize: 8, color: '#666' }}>{conversations.length}</span>
+              )}
+            </button>
+          </div>
           {/* ── EXPLORER: workspaces → historicos ─────────────────────────
               Estrutura de arvore, como o explorer do VS Code:
                 ▸ DEEP-OS (3)      ← workspace (raiz) — clique expande
                     conversa 1     ← clique abre; "..." renomeia/exclui
                     conversa 2
               Fica fixa na lateral: da para ver a organizacao sem abrir nada. */}
-          <div style={{
+          <div ref={arvoreRef} style={{
             borderBottom: '1px solid #1e1e1e', flexShrink: 0,
-            maxHeight: '38vh', overflowY: 'auto',
+            // Altura MAXIMA (nao fixa), igual ao Charon: a janelinha cresce
+            // quando voce abre uma raiz ("Geral") e rola por dentro. PEDIDO:
+            // "no jarvis quando clica em geral a janelinha de historico deve
+            // subir igual no charon para que a janela do lado direito do
+            // contexto possa ter espaco tambem".
+            //
+            // HISTORICO: eu tinha posto altura FIXA (26vh) para o painel nao
+            // "dancar" conforme a quantidade de workspaces. Funcionava, mas
+            // deixava 26vh ocupados mesmo com a arvore fechada, sobrando menos
+            // espaco para a ATIVIDADE logo abaixo — que era a queixa de os
+            // processos serem cortados. Com `maxHeight`, a arvore ocupa so o que
+            // precisa quando esta fechada e para de crescer em 32vh quando
+            // aberta, rolando internamente a partir dai.
+            maxHeight: '32vh', overflowY: 'auto', overflowX: 'hidden',
+            minWidth: 0,
           }}>
-            {/* Criar conversa: botao EXPLICITO, no topo da arvore.
-                Era um "+" solto na barra de cima, que o usuario tinha de
-                adivinhar. Agora diz o que faz, e o unico caminho para isso. */}
-            <div
-              onClick={newConversation}
-              title="Comecar uma conversa nova (nao apaga nenhuma do historico)"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                margin: '6px 8px', padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
-                background: 'rgba(0,217,255,0.07)',
-                border: '1px solid rgba(0,217,255,0.25)',
-                color: '#7fe6ff', fontSize: 10, fontWeight: 600,
-              }}>
-              <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
-              <span style={{ flex: 1 }}>Nova conversa</span>
-            </div>
-
+            {/* O botao "Nova conversa" SAIU daqui: agora ele e o "+ Novo chat"
+                da faixa acima, igual ao Charon. Dois botoes para a mesma acao foi
+                exatamente a queixa do usuario ("dois '+' e eu nao sei qual usar"). */}
             <div style={{
               display: 'flex', alignItems: 'center', gap: 4,
               padding: '4px 8px 2px', fontSize: 8, color: '#5a5a5a',
@@ -1784,107 +2003,6 @@ const JarvisPage: React.FC = () => {
               </div>
             )}
           </div>
-
-          <div style={s.messagesArea}>
-            {messages.length === 0 ? (
-              <div style={s.emptyState}>Jarvis pronto. Como posso ajudar?</div>
-            ) : messages.map(msg => (
-              <div key={msg.id} style={{
-                marginBottom: 10, padding: '10px 14px', borderRadius: 8,
-                background: msg.role === 'user' ? 'rgba(0,217,255,0.06)' : 'rgba(180,120,255,0.04)',
-                borderLeft: `3px solid ${msg.role === 'user' ? '#00d9ff' : '#b478ff'}`,
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                  <span style={{ fontSize: 13 }}>{msg.role === 'user' ? '\uD83D\uDC64' : '\uD83E\uDD16'}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: msg.role === 'user' ? '#00d9ff' : '#b478ff' }}>
-                    {msg.role === 'user' ? 'Voce' : 'Jarvis'}
-                  </span>
-                  <span style={{ fontSize: 10, color: '#555', marginLeft: 'auto' }}>
-                    {msg.timestamp.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}
-                  </span>
-                </div>
-                <div style={{ color: '#ddd', wordBreak: 'break-word', overflowWrap: 'break-word', fontSize: 13, lineHeight: 1.7, fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace" }}>
-                  {renderMessageContent(msg.content)}{msg.isStreaming && <span style={{ animation: 'blink 1s infinite', color: '#00d9ff' }}>{'\u258C'}</span>}
-                </div>
-              </div>
-            ))}
-            {isTyping && (
-              <div style={{ marginBottom: 10, padding: '10px 14px', borderRadius: 8, background: 'rgba(180,120,255,0.04)', borderLeft: '3px solid #b478ff' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                  <span style={{ fontSize: 13 }}>{'\uD83E\uDD16'}</span>
-                  <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff' }}>Jarvis</span>
-                </div>
-                <div style={{ display: 'flex', gap: 6, padding: '6px 0' }}>
-                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite' }} />
-                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.2s' }} />
-                  <span style={{ width: 7, height: 7, background: '#b478ff', borderRadius: '50%', animation: 'pulse 1.4s infinite 0.4s' }} />
-                </div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          <div style={s.inputSection}>
-            <div onPointerDown={(e) => { e.preventDefault(); const startY = e.clientY; const startH = textareaHeightRef.current; const move = (ev: PointerEvent) => { const delta = startY - ev.clientY; textareaHeightRef.current = Math.max(36, Math.min(300, startH + delta)); setTextareaHeight(textareaHeightRef.current); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ height: 6, cursor: 'ns-resize', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, margin: '2px 0' }}>
-              <div style={{ width: 40, height: 3, borderRadius: 2, background: '#444' }} />
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown}
-                placeholder={isListening ? 'Ouvindo...' : 'Digite sua mensagem...'}
-                style={{ ...s.textarea, height: textareaHeight, borderColor: isListening ? '#ef4444' : '#333' }}
-                disabled={isTyping} />
-              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
-                      {isListening ? '\u23F9' : '\uD83C\uDF99'}
-                    </button>
-                    <button onClick={() => { if (isSpeaking) stopSpeaking(); setAutoSpeakEnabled(!autoSpeakEnabled); }} style={{ ...s.iconBtn, background: autoSpeakEnabled ? '#0c0' : '#1a1a2e', color: autoSpeakEnabled ? '#fff' : '#666' }} title={autoSpeakEnabled ? 'Falante ON (clique para desativar)' : 'Falante OFF (clique para ativar)'}>
-                      {autoSpeakEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07'}
-                    </button>
-                    <button onClick={stopGeneration} disabled={!isTyping} style={{ ...s.iconBtn, background: isTyping ? '#ef4444' : '#1a1a2e', color: isTyping ? '#fff' : '#666', opacity: isTyping ? 1 : 0.4 }} title="Parar geracao">
-                      {'\u23F9'}
-                    </button>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
-                    <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
-                      {isTyping ? 'Processando...' : 'Jarvis ativo'}
-                    </span>
-                  </div>
-                  {/* Monitor de CPU / RAM / VRAM, embaixo dos botoes.
-                      Pedido do usuario: "tem que ficar embaixo do lado direito
-                      dos botoes". Fica na mesma coluna do "Jarvis ativo" para
-                      nao empurrar o botao de enviar. */}
-                  <div style={{ marginTop: 3 }}>
-                    <MiniMonitors />
-                  </div>
-                </div>
-                <button style={s.sendBtn} onClick={handleSendMessage} disabled={!input.trim() || isTyping}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <line x1="22" y1="2" x2="11" y2="13" />
-                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div onPointerDown={(e) => { e.preventDefault(); const startX = e.clientX; const startW = rightPanelWidthRef.current; const move = (ev: PointerEvent) => { const delta = startX - ev.clientX; rightPanelWidthRef.current = Math.max(200, Math.min(500, startW + delta)); setRightPanelWidth(rightPanelWidthRef.current); }; const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); }; window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); }} style={{ width: 5, cursor: 'ew-resize', alignItems: 'center', justifyContent: 'center', flexShrink: 0, background: '#111' }}>
-          <div style={{ width: 3, height: 40, borderRadius: 2, background: '#333' }} />
-        </div>
-
-        {/* ── Painel de execucao (organizacao no estilo VS Code) ──────────────
-            Antes era uma lista PLANA de texto: cada evento virava um bloco
-            igual, sem hierarquia, sem duracao e sem o plano real. O usuario
-            descreveu como "o modelo fala que vai fazer e fica ali no plano".
-
-            Agora tem tres camadas, como o painel de tarefas do VS Code:
-              1. CABECALHO com contador de passos e barra de progresso geral;
-              2. PLANO — os passos que o BACKEND enviou (task_checklist /
-                 task_progress), cada um com estado proprio;
-              3. ATIVIDADE — a arvore cronologica: evento principal e, um nivel
-                 abaixo, parametros e resultado, com tempo de cada ferramenta. */}
-        <div style={{ ...s.rightPanel, width: rightPanelWidth }}>
           <div style={s.rightHeader}>
             <span style={{ fontSize: 11, fontWeight: 600, color: '#b478ff', letterSpacing: 0.5 }}>
               {'\u25B6'} EXECUCAO
@@ -2503,7 +2621,7 @@ const s: Record<string, React.CSSProperties> = {
   textarea: { width: '100%', resize: 'none', padding: '8px', borderRadius: 4, border: '1px solid #333', background: '#1a1a2e', color: '#ccc', fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace", fontSize: 11, lineHeight: 1.4, boxSizing: 'border-box', outline: 'none' },
   iconBtn: { width: 28, height: 28, borderRadius: 4, border: '1px solid #333', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12 },
   sendBtn: { width: 28, height: 28, borderRadius: 4, border: '1px solid #333', background: '#1a1a2e', color: '#ccc', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' },
-  rightPanel: { width: 280, display: 'flex', flexDirection: 'column', flexShrink: 0, borderLeft: '1px solid #222', minHeight: 0, background: '#08081a' },
+  rightPanel: { width: 340, display: 'flex', flexDirection: 'column', flexShrink: 0, borderLeft: '1px solid #222', minHeight: 0, background: '#08081a', overflow: 'hidden' },
   rightHeader: { padding: '8px 12px', borderBottom: '1px solid #1a1a2e', flexShrink: 0, display: 'flex', alignItems: 'center' },
   processList: { flex: 1, overflowY: 'auto', overflowX: 'hidden', padding: 8, minHeight: 0, display: 'flex', flexDirection: 'column', gap: 4 },
   processItem: { padding: '6px 8px', borderRadius: 4, background: 'rgba(255,255,255,0.02)', borderLeft: '2px solid #444', fontSize: 10 },

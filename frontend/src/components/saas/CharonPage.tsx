@@ -1575,6 +1575,19 @@ const handleSaveIdentity = async () => {
                   </button>
                 </div>
               </div>
+              {/* Monitor de CPU / RAM / VRAM — ABAIXO DO CAMPO DE CHAT.
+                  PEDIDO FINAL do usuario: "reformulando abaixo do campo do chat".
+                  Antes ficava no rodape do painel DIREITO, empurrando o que havia
+                  ali. Aqui vira uma FAIXA propria abaixo do campo, centralizada —
+                  longe das barras de arrastar (a vertical da direita e a
+                  horizontal acima do textarea), que era o incomodo relatado.
+                  Reusa o MESMO componente do Jarvis e do App. */}
+              <div style={{
+                borderTop: '1px solid #1a1a1a', paddingTop: 4, marginTop: 4,
+                display: 'flex', justifyContent: 'center',
+              }}>
+                <MiniMonitors />
+              </div>
             </div>
           </div>
 
@@ -1930,7 +1943,7 @@ const handleSaveIdentity = async () => {
                 ))
               )}
             </div>
-            <div style={{ ...s.rightFooter, flexWrap: 'wrap' }}>
+            <div style={s.rightFooter}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc }} />
                 <span style={{ fontSize: 10, color: sc }}>
@@ -1939,15 +1952,9 @@ const handleSaveIdentity = async () => {
               </div>
               <span style={{ fontSize: 10, color: '#999' }}>·</span>
               <span style={{ fontSize: 10, color: '#999' }}>Voz: {voiceName}</span>
-              {/* Monitor de CPU / RAM / VRAM, abaixo do "Charon ativo".
-                  PEDIDO: "e no charon as barras de processos deixe abaixo do lado
-                  direito da descricao -> Charon ativo".
-                  `flexBasis: 100%` forca a quebra de linha: o rodape e uma linha
-                  flex, e sem isso o monitor ficaria ao LADO do texto em vez de
-                  embaixo. Reusa o MESMO componente do Jarvis/App (um lugar so). */}
-              <div style={{ flexBasis: '100%', marginTop: 3 }}>
-                <MiniMonitors />
-              </div>
+              {/* O monitor NAO fica mais aqui: foi para baixo do campo de chat.
+                  Deixar nos dois lugares duplicaria o medidor (e ele e um
+                  componente so, compartilhado com o Jarvis e o App). */}
             </div>
           </div>
         </div>
