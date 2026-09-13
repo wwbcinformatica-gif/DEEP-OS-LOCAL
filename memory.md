@@ -37,7 +37,26 @@ Sistema operacional de agentes de IA com 3 modos de interacao:
 - **Voz** (Live API) — Charon via Google Gemini Live
 - **SaaS** — Multi-tenant para venda/locacao
 
-## Status Atual (2026-09-12)
+## Status Atual (2026-09-13)
+**SESSAO 50 (madrugada) — GGUF/llama-server, identidade separada, monitor e layout** ✓
+
+### GGUF: "o start-saas.bat nao inicia o servidor para modelos gguf local"
+Quatro defeitos empilhados (o passo nao existia; modelo escolhido era loteria;
+`gpu_layers: 999` estourava a VRAM; `findstr` no config.yaml errado). Detalhes e
+medicoes no `STATUS.md`. **`bin/` e `models/` estao no `.gitignore`**, entao o
+`llama-server.exe` nunca esteve no repositorio — o binario foi copiado (103 MB,
+build Vulkan) e os modelos entraram por **atalho**, sem duplicar 28 GB.
+
+### O Charon achava que estava na VPS
+O `CHARON_CONTEXT.md` descrevia os dois modos sem dizer qual estava ativo. Foi
+por isso que o usuario criou o projeto gemeo. Ver regra 74.
+
+### Identidade e monitor
+Nome do assistente compartilhado, nome do usuario por assistente (colunas no
+tenant). Monitor de CPU/RAM/VRAM abaixo do campo de chat; faltava `/monitor` no
+proxy do Vite E no nginx (regras 68, 69 e 78).
+
+
 **SESSAO 50 — CHARON: `<ctrl46>`, ESCOLHA DE CONTEXTO E SESSAO NOMEADA** ✓
 
 ### Charon: o turno que nascia morto (`<ctrl46>`)
@@ -1271,3 +1290,58 @@ lsof -i :443
     codigo. Agora `testes_esquecidos()` avisa quais `test_*.py` existem na pasta e
     nao estao na lista. Regra que depende de alguem lembrar vai ser quebrada:
     faca a FERRAMENTA avisar.
+68. **O NGINX DA VPS NAO E INSTALADO PELO DEPLOY.** A config real e
+    `/etc/nginx/sites-enabled/deepos`, escrita A MAO. O `nginx/vps-nginx.conf` do
+    projeto e so REFERENCIA e ja divergiu (aponta para o Vite :5176, certificado
+    `-0001`, `server_name` diferente). O `deploy-faf8f93.sh` publica o frontend e
+    faz `systemctl reload`, mas NUNCA instala config. **NUNCA** substitua o
+    arquivo real pelo do projeto — ele tem TLS e o `root` do site. Rota nova que
+    o navegador chama precisa existir nos DOIS lugares. O deploy agora testa
+    `/monitor`, `/llamacpp/models` e `/ollama/status` e AVISA quais nao chegam.
+69. **HTML com HTTP 200 e o disfarce mais comum deste projeto.** O `location /`
+    (SPA fallback) responde `index.html` com 200 para QUALQUER caminho que o
+    nginx nao encaminhe. O `fetch` "da certo", o `.json()` falha e o sintoma
+    aponta para o lugar errado — foi assim com `/monitor` (barras vazias). Por
+    isso o verificador exige **JSON**, nao status 200.
+70. **Declaracao de ferramenta que MENTE e pior que declaracao ausente.** A
+    `youtube_video` do Charon dizia `search (padrao) ou open`, mas o
+    `_ACTION_MAP` so aceita `play/summarize/get_info/trending`. O modelo obedecia
+    a declaracao, mandava `search` e recebia erro. Confira SEMPRE a declaracao
+    contra o handler (o Jarvis ja estava certo; so o Charon mentia).
+71. **`.bat` que escolhe arquivo: `for` + `if` com `%%~nxf` vs `%%f` NUNCA casa.**
+    O laco `for %%f in (*.gguf) do (if not "%%~nxf"=="%%f" set VAR=%%~ff)`
+    compara o NOME com o CAMINHO COMPLETO: o `if` e sempre verdadeiro e o laco
+    fica com o ULTIMO arquivo. Era o "modelo loteria". Use um script separado com
+    sub-rotina (`escolher-modelo.bat`).
+72. **`.bat` com fim de linha LF nao executa — e SEM erro visivel.** Criei o
+    `escolher-modelo.bat` pelo editor e o `cmd` simplesmente nao fazia nada. O
+    `.gitattributes` ja tem `*.bat text eol=crlf`, entao o REPOSITORIO estava
+    certo; a copia de trabalho nao. Ao criar `.bat`/`.cmd`, garanta CRLF.
+73. **VRAM: nao fixe `--n-gpu-layers`.** Com `999` ("tudo na GPU") um modelo de
+    13 GB morre numa placa de 12 GB com `ErrorOutOfDeviceMemory`. Com `-1` o
+    llama.cpp decide quantas camadas cabem (o resto vai para a CPU) e o MESMO
+    comando serve para 8, 12 ou 24 GB. O usuario TROCA de placa: numero fixo
+    exigiria editar config junto.
+74. **Prompt que descreve DOIS ambientes sem dizer qual esta ativo faz o modelo
+    escolher — e ele escolhe errado.** O `CHARON_CONTEXT.md` listava "Local" e
+    "VPS/Headless", e o Charon se declarou num servidor estando no PC do usuario
+    (foi por isso que ele criou o projeto gemeo). Injete a verdade do runtime,
+    montada da MESMA funcao que decide as ferramentas (`is_headless()`), e proiba
+    explicitamente culpar o ambiente quando uma ferramenta falhar.
+75. **Identidade: nome do ASSISTENTE e um so; nome do USUARIO e por assistente.**
+    Decisao do usuario. Antes o Jarvis lia o `config.yaml` global e o Charon lia o
+    tenant — fontes diferentes, nomes diferentes na tela. Colunas
+    `charon_user_name` / `jarvis_user_name` no tenant, com `user_name` de padrao.
+76. **Cache de identidade tem de ser POR CHAVE (tenant + assistente).** Um cache
+    unico faz o primeiro assinante a chamar "emprestar" a identidade para os
+    outros — mesma classe do vazamento de instancias.
+77. **Botao que salva precisa conferir a resposta HTTP.** Os botoes de GPU
+    mandavam `{use_gpu}` e o backend exigia `{gpu_enabled}`: **422**, nada salvo,
+    e o `catch {}` vazio escondia. A tela dizia "salvo". Mesmo padrao do
+    `.catch(() => {})` do 401 (regra 32) e do `'***saved***'` (regra 33).
+78. **Ausencia de dado nao pode parecer defeito.** O medidor mostrava `---` na
+    GPU quando a maquina NAO TEM placa (a VPS tem 3,8 GB e nenhuma GPU). O
+    usuario leu como "quebrado". Agora diz **"sem"**. Antes de usar um simbolo
+    neutro, pergunte o que o usuario vai entender ao ver. O usuario abre o site
+    publicado e o medidor esta medindo o SERVIDOR, nao o PC dele — diga isso na
+    propria tela (tem `title` no componente).

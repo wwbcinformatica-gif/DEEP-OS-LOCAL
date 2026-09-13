@@ -1,6 +1,6 @@
 # DEEP-OS — Status do Projeto
 
-**Ultima atualizacao:** 2026-09-12 (Sessao 50) - ver `docs/CONTINUAR.md` para o estado atual e o que falta
+**Ultima atualizacao:** 2026-09-13 (Sessao 50, madrugada) - ver `docs/CONTINUAR.md` para o estado atual e o que falta
 
 **Commit em producao:** (confira - ver `docs/CONTINUAR.md` secao 1) | **Backend:** `deepos-backend.service` (active) | **Site:** https://deep-os.tech
 
@@ -119,6 +119,105 @@ Agora o runner avisa quais `test_*.py` ficaram de fora.
 - **Botão "⚡ Charon ouvindo"**: pergunta do usuário que virou bug real — religar
   mandava `history: []` e o Charon voltava **sem o contexto** da conversa. Agora
   reconecta retomando o histórico. O histórico *gravado* nunca se perdia ali.
+
+---
+
+## Sessão 2026-09-13 (madrugada) — GGUF, identidade, monitor e layout
+
+### 1. "O `start-saas.bat` não inicia o servidor para modelos GGUF"
+
+O relato do usuário escondia **quatro** defeitos empilhados, cada um escondendo o
+próximo:
+
+| # | Defeito | Correção |
+|---|---|---|
+| 1 | O passo do `llama-server` **não existia** no `start-saas.bat` (só no `START-TOTAL.bat`) | adicionado como `[1/4]` |
+| 2 | O modelo escolhido era **loteria**: `if not "%%~nxf"=="%%f"` — `%%~nxf` é só o nome e `%%f` o caminho completo, então a comparação **nunca** era igual e o laço ficava com o **último** arquivo | `escolher-modelo.bat`, com ordem de preferência (e `models\preferido.txt` para fixar um) |
+| 3 | `backend/config.yaml` tinha `gpu_layers: 999` (tudo na GPU) → `ErrorOutOfDeviceMemory` nos 27B | **`-1` (auto-fit)**: serve para 8, 12 ou 24 GB — o usuário troca de placa |
+| 4 | Os `.bat` procuravam `gpu_enabled` no `config.yaml` da **raiz**, mas a chave está em **`backend\config.yaml`** → o `findstr` nunca casava | caminho corrigido |
+
+**Também:** `bin/` e `models/` estão no `.gitignore`, então o `llama-server.exe`
+**nunca esteve no repositório** — um clone novo não consegue rodar GGUF. O binário
+(103 MB, build **Vulkan**, versão `1 (9fcaed7)`) foi copiado de `I:\DEEP-OS` e os
+modelos entraram por **atalho (junction)**, sem duplicar os ~28 GB:
+`C:\DEEP-OS\models` → `C:\DEEP-OS-LOCAL\models`.
+
+**Medido (RTX 3060 12 GB, 12 GB de RAM), com `-1`:**
+
+| Modelo | Tamanho | Resultado |
+|---|---|---|
+| Llama-3.2-3B | 1,88 GB | ✅ 12s |
+| Qwen2.5-7B | 4,36 GB | ✅ 18s |
+| NemoMix-12B | 6,96 GB | ✅ 42s |
+| Qwen3.8-27B-IQ4_XS | 13,27 GB | ✅ 78s (parte na CPU) |
+
+Com `999` os dois 27B **falhavam**. Duplicados conferidos por **SHA256**: são
+byte a byte idênticos (o seletor mostrar um só está correto).
+
+### 2. O Charon achava que estava na VPS (rodando no PC)
+
+Ele respondeu, no PC (que tem desktop): *"Estou em um ambiente de servidor
+(headless), sem interface gráfica..."* — enquanto o Jarvis fazia a mesma tarefa
+na mesma máquina. **Foi por isso que o usuário criou o projeto gêmeo local.**
+
+**Causa:** o `CHARON_CONTEXT.md` entra inteiro no prompt e descrevia **os dois**
+modos (Local e VPS) **sem dizer qual estava ativo**. O modelo escolheu o
+restritivo — e as ferramentas de tela estavam indisponíveis naquele momento por
+outro bug, o que "confirmava" a conclusão errada dele.
+
+**Correção:** `_substituir_secao_ambiente()` remove as seções de ambiente do texto
+**enviado** (o arquivo fica intacto) e põe **uma** declaração montada do
+`is_headless()` — a mesma função que decide as ferramentas. A regra 5 do arquivo
+(que só valia no VPS) é trocada por *"diga o erro REAL, nunca culpe o ambiente"*.
+
+### 3. Nome do usuário separado por assistente
+
+**Decisão do usuário** (perguntado direto): nome do **assistente** é **um só**
+para os dois; nome do **usuário** é **separado**.
+
+- migração em `database/connection.py` (padrão `PRAGMA` + `ALTER TABLE`) criando
+  `charon_user_name` e `jarvis_user_name`; `user_name` continua como padrão;
+- `get_identity(tenant, assistente)` / `set_identity(..., assistente)` — o nome da
+  coluna sai de um **mapa fechado**, nunca do valor recebido;
+- `GET /api/config/identity?assistente=charon|jarvis`; o Jarvis manda
+  `assistente: "jarvis"` na mensagem do chat.
+
+### 4. Interface: Jarvis com o layout do Charon
+
+Árvore de conversas movida para o **painel direito**; barra de sessão no topo;
+os dois botões **`+ Novo chat`** e **`Continuar`**; a janelinha usa
+**`maxHeight: 32vh`** (igual ao Charon); larguras/altura **persistidas**
+(`jarvis_textarea_height`, `jarvis_right_panel_width` — o Charon já fazia).
+
+### 5. Monitor de CPU/RAM/VRAM
+
+- passou a ser exibido **abaixo do campo de chat** nas duas telas;
+- **as barras ficavam vazias** por falta de `/monitor` no proxy do **Vite** e no
+  **nginx**: o pedido voltava como `index.html` com **HTTP 200** (o `fetch` "dava
+  certo", o `.json()` falhava, o `catch` engolia);
+- **o nginx da VPS NÃO é instalado pelo deploy** — a config real é
+  `/etc/nginx/sites-enabled/deepos`, escrita à mão; `nginx/vps-nginx.conf` é só
+  referência e já divergiu. O deploy agora **avisa** quais rotas não chegam ao
+  backend (passo 7b), e o verificador **testa `/monitor` exigindo JSON**;
+- GPU sem placa NVIDIA mostra **"sem"** (não `---`, que parecia defeito).
+
+### 6. Vazamento entre assinantes nas instâncias
+
+`routes/instances.py` tirava o tenant de um **parâmetro da requisição** e o
+frontend chamava `/api/instances` **sem** ele → caía no `SELECT` sem filtro e
+devolvia as instâncias de **todos** os assinantes. Pior: `PUT`/`DELETE` não
+conferiam tenant nenhum. **Agora o tenant vem do JWT** nas quatro operações.
+Foi o risco que o usuário levantou sozinho: *"se for um usuário esperto... ele
+poderia ter acesso a outras conversas e pesquisas de outros usuários"*.
+
+### 7. Botões de GPU do Ollama e llama.cpp
+
+Mandavam `{use_gpu}`, o backend exige `{gpu_enabled}` → **422, nada era salvo**,
+nos dois. Corrigido, com conferência da resposta HTTP e reversão do botão em caso
+de falha. A declaração da ferramenta `youtube_video` no Charon dizia
+`search/open` mas o `_ACTION_MAP` só aceita `play/summarize/get_info/trending` —
+o modelo obedecia a declaração e recebia erro. **Declaração que mente é pior que
+declaração ausente.**
 
 ---
 
