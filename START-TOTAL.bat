@@ -12,6 +12,7 @@ echo [1/6] Limpando processos antigos...
 taskkill /FI "WINDOWTITLE eq WBC Backend*" /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq WBC Frontend*" /F >nul 2>&1
 taskkill /FI "WINDOWTITLE eq LLamaCPP*" /F >nul 2>&1
+taskkill /f /im llama-server.exe >nul 2>&1
 timeout /t 2 /nobreak >nul
 echo  OK
 
@@ -28,8 +29,55 @@ if not exist "venv\Scripts\python.exe" (
     pause
     exit /b 1
 )
+echo  OK
 
+REM 3. Inicia llama-server com GGUF (porta 8080)
+echo [3/6] Iniciando llama-server GGUF (porta 8080)...
+REM Quem escolhe o modelo e o escolher-modelo.bat.
+REM
+REM ANTES este trecho fazia o laco abaixo, que estava ERRADO:
+REM     for %%f in (models\gguf\*.gguf) do (
+REM         if not "%%~nxf"=="%%f" ( set "MODEL_GGUF=%%~ff" )
+REM     )
+REM `%%~nxf` e so o NOME e `%%f` e o caminho COMPLETO: a comparacao nunca era
+REM igual, o `if` era sempre verdadeiro e o laco ficava com o ULTIMO arquivo.
+REM Ou seja: o modelo carregado era loteria. Agora a ordem de preferencia e
+REM explicita e da para fixar um modelo em models\preferido.txt.
+set "MODEL_GGUF="
+for /f "usebackq delims=" %%f in (`call "%~dp0escolher-modelo.bat" 2^>nul`) do (
+    if not defined MODEL_GGUF set "MODEL_GGUF=%%f"
 )
+
+if defined MODEL_GGUF (
+    call :gpu_flag
+    start "LLamaCPP :8080" cmd /c "bin\vulkan\llama-server.exe" --model "%MODEL_GGUF%" --port 8080 --ctx-size 8192 --host 0.0.0.0 %GPU_FLAG%
+    timeout /t 5 /nobreak >nul
+    echo  OK - Modelo: %MODEL_GGUF%
+) else (
+    echo  AVISO: Nenhum modelo .gguf encontrado em models\
+)
+goto :depois_llama
+
+:gpu_flag
+REM -1 = AUTO: o llama.cpp decide quantas camadas cabem na placa.
+REM
+REM ANTES era "--n-gpu-layers 999" (todas as camadas na GPU). Numa RTX 3060 de
+REM 12 GB isso derrubava o carregamento de modelos grandes:
+REM     ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory
+REM Com -1 o modelo de 27B (13 GB) carrega, jogando na CPU o que nao couber.
+REM
+REM NAO fixe um numero aqui: o usuario troca de placa e o numero teria de mudar
+REM junto. Com -1 o mesmo comando serve para 8, 12 ou 24 GB.
+set "GPU_FLAG=--n-gpu-layers -1"
+REM O CAMINHO e backend\config.yaml, NAO o config.yaml da raiz.
+REM ANTES apontava para "config.yaml" (raiz), que nao tem a chave gpu_enabled —
+REM entao o findstr NUNCA casava e a deteccao nao funcionava em projeto nenhum.
+REM Quem le esse arquivo em runtime e backend/routes/llamacpp_route.py.
+findstr /i "gpu_enabled: false" "%~dp0backend\config.yaml" >nul 2>&1
+if %errorlevel% equ 0 set "GPU_FLAG="
+exit /b
+
+:depois_llama
 
 REM 4. Inicia Backend (porta 8001)
 echo [4/6] Iniciando Backend (FastAPI + WebSocket)...
@@ -47,37 +95,6 @@ cd /d "%FRONTEND_DIR%"
 start "WBC Frontend :5175" cmd /c npm run dev
 timeout /t 3 /nobreak >nul
 echo  OK
-
-echo  OK
-
-REM 3. Inicia llama-server com GGUF (porta 8080)
-echo [3/6] Iniciando llama-server GGUF (porta 8080)...
-set "MODEL_GGUF="
-:: Busca qualquer .gguf na pasta models/gguf
-for %%f in (models\gguf\*.gguf) do (
-    if not "%%~nxf"=="%%f" (
-        set "MODEL_GGUF=%%~ff"
-    )
-)
-:: Se nao encontrou na subpasta, busca na raiz models/
-if not defined MODEL_GGUF (
-    for %%f in (models\*.gguf) do (
-        set "MODEL_GGUF=%%~ff"
-    )
-)
-
-if defined MODEL_GGUF (
-    set "GPU_FLAG="
-    :: Verifica se GPU esta habilitada no config
-    findstr /i "gpu_enabled: true" config.yaml >nul 2>&1
-    if %errorlevel% equ 0 (
-        set "GPU_FLAG=--n-gpu-layers 999"
-    )
-    start "LLamaCPP :8080" cmd /c "bin\vulkan\llama-server.exe" --model "%MODEL_GGUF%" --port 8080 --ctx-size 8192 --host 0.0.0.0 %GPU_FLAG%
-    timeout /t 5 /nobreak >nul
-    echo  OK - Modelo: %MODEL_GGUF%
-) else (
-    echo  AVISO: Nenhum modelo .gguf encontrado em models\
 
 REM 6. Abre navegador
 echo [6/6] Abrindo navegador...
