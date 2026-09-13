@@ -88,6 +88,13 @@ class IdentityConfig(BaseModel):
     user_name: str = ""
     custom_color: str = ""
     voice: str = "Charon"
+    # Qual assistente esta salvando ("charon" | "jarvis").
+    #
+    # O NOME DO ASSISTENTE e um so para os dois (decisao do usuario), mas o NOME
+    # DO USUARIO e separado por assistente. Sem este campo, salvar num mudaria o
+    # nome usado pelo outro — foi o defeito relatado ("trocado para wilson e o
+    # jarvis recebeu yuri").
+    assistente: str = ""
 
 class SandboxConfig(BaseModel):
     enabled: bool
@@ -162,12 +169,19 @@ async def update_accent_theme(config: AccentThemeConfig):
     return {"status": "success", "accent_theme": config.theme}
 
 @router.get("/identity")
-async def get_identity(tenant_id: str | None = Depends(get_current_tenant_optional)):
+async def get_identity(
+    tenant_id: str | None = Depends(get_current_tenant_optional),
+    assistente: str = "",
+):
     """
     Identidade (nome do assistente/usuario/voz).
 
     Com JWT valido -> identidade daquele tenant (isolada por assinante).
     Sem JWT         -> identidade global de config.yaml (app desktop).
+
+    `assistente` ("charon" | "jarvis") escolhe de qual coluna vem o NOME DO
+    USUARIO: cada assistente tem o seu (ver core/tenant_identity.get_identity).
+    O nome do ASSISTENTE e o mesmo para os dois.
 
     NOTA: esta rota precisa vir ANTES do catch-all `/{section}` (que fica no
     fim do arquivo). Enquanto ele vinha primeiro, este path casava com o
@@ -176,7 +190,7 @@ async def get_identity(tenant_id: str | None = Depends(get_current_tenant_option
     """
     from core.tenant_identity import get_identity as _get_tenant_identity
 
-    identity = _get_tenant_identity(tenant_id)
+    identity = _get_tenant_identity(tenant_id, assistente or None)
     data = _read_config()
     global_identity = data.get("identity", {})
     return {
@@ -208,6 +222,7 @@ async def update_identity(
             config.assistant_name,
             config.user_name,
             voice=config.voice,
+            assistente=config.assistente or None,
         )
         if saved:
             # custom_color segue global: e aparencia da interface, nao

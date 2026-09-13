@@ -223,6 +223,20 @@ def init_db():
             ("assistant_name", "ALTER TABLE tenants ADD COLUMN assistant_name TEXT"),
             ("user_name", "ALTER TABLE tenants ADD COLUMN user_name TEXT"),
             ("voice", "ALTER TABLE tenants ADD COLUMN voice TEXT"),
+            # Nome do USUARIO por assistente (decisao do usuario: "separados
+            # tambem"). O Charon e o Jarvis sao assistentes distintos e cada um
+            # pode tratar a pessoa por um nome diferente.
+            #
+            # Sem estas colunas, os dois leriam `tenants.user_name` — e trocar o
+            # nome no Charon mudava o que o Jarvis fala. Foi o defeito relatado:
+            # "eu tinha salvo um nome de usuario de yuri no charon que ja foi
+            # trocado para wilson e agora em jarvis ele acabou recebendo que o
+            # usuario tem o nome de yuri".
+            #
+            # `user_name` CONTINUA existindo como valor padrao das duas colunas
+            # novas, para nao quebrar quem ja tinha o nome gravado.
+            ("charon_user_name", "ALTER TABLE tenants ADD COLUMN charon_user_name TEXT"),
+            ("jarvis_user_name", "ALTER TABLE tenants ADD COLUMN jarvis_user_name TEXT"),
         ):
             if _col not in _existing_cols:
                 cur.execute(_ddl)

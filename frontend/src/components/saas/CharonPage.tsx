@@ -1,5 +1,8 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { renderMarkdown } from './markdownRenderer';
+// Monitor de CPU/RAM/VRAM, abaixo do "Charon ativo". Mesmo componente que o
+// Jarvis e o App usam — um lugar so.
+import MiniMonitors from '../MiniMonitors';
 import {
   Conversation, TranscriptEntry,
   getConversations, createConversation, renameConversation, deleteConversation,
@@ -249,6 +252,12 @@ const CharonPage: React.FC = () => {
   const activeConvIdRef = useRef<string>('');
   const transcriptsRef = useRef<TranscriptEntry[]>([]);
   const activityLogRef = useRef<TranscriptEntry[]>([]);
+  // Espelho do workspace ativo: `addUserTranscript` e um useCallback de deps
+  // vazias (roda no callback do microfone), entao leria o state congelado.
+  const workspaceAtivoRef = useRef<string>(tenantGet('charon_workspace') || WORKSPACE_PADRAO);
+  // Container da arvore de workspaces, para rolar ate ela quando o usuario
+  // pede "Continuar uma conversa" (as raizes nascem fechadas).
+  const arvoreRef = useRef<HTMLDivElement>(null);
   const [showConvMenu, setShowConvMenu] = useState(false);
 
   // Load transcripts when active conversation changes
@@ -411,23 +420,38 @@ const CharonPage: React.FC = () => {
     setRightPanelWidth(savedWidth);
     rightPanelWidthRef.current = savedWidth;
     contextFilterRef.current = savedFilter;
-    // Carrega identity do tenant (JWT identifica o tenant no backend)
+    // Carrega identity do tenant (JWT identifica o tenant no backend).
+    //
+    // `assistente=charon`: o NOME DO USUARIO tem coluna propria por assistente
+    // (decisao do usuario: o Jarvis e o Jarvis, o Charon e o Charon). O nome do
+    // ASSISTENTE e o mesmo para os dois.
     const identityToken = tenantGet('saas_token') || localStorage.getItem('saas_token');
-    fetch('/api/config/identity', {
+    fetch('/api/config/identity?assistente=charon', {
       headers: identityToken ? { Authorization: `Bearer ${identityToken}` } : {},
     })
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data) {
           const name = data.assistant_name || 'DEEP-OS';
-          const user = data.user_name || '';
           const voice = data.voice || '';
+          // NOME DO ASSISTENTE: um so para os dois assistentes (decisao do
+          // usuario) — vem do servidor e vale para o Jarvis tambem.
           setAssistantName(name);
-          setUserName(user);
           assistantNameRef.current = name;
-          userNameRef.current = user;
           tenantSet('charon_assistant_name', name);
-          tenantSet('charon_user_name', user);
+
+          // NOME DO USUARIO: CADA ASSISTENTE tem o seu (decisao do usuario:
+          // "separados tambem"). A chave `charon_user_name` e a fonte; o valor do
+          // servidor so entra na PRIMEIRA vez, quando o usuario ainda nao
+          // personalizou este assistente. Sem essa distincao, salvar no Jarvis
+          // mudaria o nome que o Charon usa na fala seguinte — foi o defeito
+          // relatado ("trocado para wilson e o jarvis recebeu yuri").
+          const jaEscolhido = tenantGet('charon_user_name');
+          const user = jaEscolhido ?? (data.user_name || '');
+          setUserName(user);
+          userNameRef.current = user;
+          if (jaEscolhido === null) tenantSet('charon_user_name', user);
+
           if (voice) {
             setVoiceName(voice);
             voiceNameRef.current = voice;
@@ -524,6 +548,35 @@ const CharonPage: React.FC = () => {
   // em vez de perguntar. O pedido dele era o painel CENTRAL no download, nao
   // mudar a transcricao.)
   const addUserTranscript = useCallback((text: string) => {
+    // O usuario FALOU: se ainda nao ha conversa aberta, cria agora.
+    //
+    // BUG RELATADO: "ele ainda nao ve o contexto do historico".
+    //
+    // Causa: no Charon a conversa so nascia no "+ Novo chat" ou clicando numa
+    // sessao da arvore. Quem abria a pagina e falava direto ficava com
+    // `activeConvId` VAZIO — e o efeito que grava (`saveTranscripts`) exige um
+    // id. Resultado: as falas apareciam na tela e NAO eram gravadas em lugar
+    // nenhum. Depois, ao clicar numa sessao do historico, nao havia o que
+    // restaurar — e o Charon respondia com o contexto do PROJETO (que vem do
+    // system prompt), parecendo que estava lembrando de algo.
+    //
+    // O Jarvis ja fazia isso (`sendText` cria a conversa na primeira mensagem).
+    // Era mais um caso da armadilha nº 0: a mesma correcao existia em um lugar
+    // so. Aqui a criacao NAO pode acontecer no primeiro transcript, porque o
+    // Charon manda a saudacao antes do usuario falar — e isso criaria uma
+    // conversa a cada abertura de pagina.
+    if (!activeConvIdRef.current) {
+      const conv = createConversation(undefined, workspaceAtivoRef.current, assistantNameRef.current || 'Charon');
+      activeConvIdRef.current = conv.id;
+      setConversations(getConversations());
+      setTodosWorkspaces(getWorkspaces());
+      setActiveConvId(conv.id);
+      modoInicioRef.current = 'novo';
+      setModoInicio('novo');
+      // O ref do "carregando" evita que o efeito de carregar apague estas falas.
+      carregandoConversaRef.current = true;
+      setTimeout(() => { carregandoConversaRef.current = false; }, 0);
+    }
     setTranscripts(prev => [...prev, { speaker: 'user', text, time: now() }]);
   }, []);
 
@@ -1167,7 +1220,7 @@ const CharonPage: React.FC = () => {
     tenantSet('charon_voice', voiceName);
     try {
       const idToken = tenantGet('saas_token') || localStorage.getItem('saas_token');
-      await fetch('/api/config/identity', {
+      const resp = await fetch('/api/config/identity', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -1177,14 +1230,29 @@ const CharonPage: React.FC = () => {
           assistant_name: assistantName,
           user_name: userName,
           custom_color: '',
-          voice: voiceName
+          voice: voiceName,
+          // Salvar aqui e o CHARON: o nome do usuario tem coluna propria por
+          // assistente, entao isto nao muda o nome usado pelo Jarvis.
+          assistente: 'charon',
         })
       });
-      await fetch('/voice/disconnect-all', { method: 'POST' }).catch(() => {});
+      // Antes nao havia checagem: um 401 (middleware da VPS) passava batido e o
+      // alerta dizia "salva". Agora falha aparece.
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      // O ref tem de ser atualizado AQUI: e ele que a conexao le. O `useEffect`
+      // que sincroniza roda depois do commit, entao a sessao podia reabrir com a
+      // voz anterior — a causa do "escolhi Charon e falou Aoede".
+      voiceNameRef.current = voiceName;
+      assistantNameRef.current = assistantName;
+      userNameRef.current = userName;
+      if (startedRef.current) {
+        disconnectVoice();
+        setTimeout(() => connectVoiceRef.current(), 600);
+      }
+      alert('Voz salva e aplicada.');
     } catch (e) {
-      console.error('Erro ao salvar voz:', e);
+      alert(`Nao consegui salvar a voz: ${(e as Error)?.message || 'falha de rede'}`);
     }
-    alert('Voz salva! Aplicada na proxima vez que reiniciar o Charon.');
   };
 
   const handleSaveApiKey = async () => {
@@ -1226,7 +1294,7 @@ const handleSaveIdentity = async () => {
     // Salva no backend config.yaml via API correta
     try {
       const idToken = tenantGet('saas_token') || localStorage.getItem('saas_token');
-      await fetch('/api/config/identity', {
+      const resp = await fetch('/api/config/identity', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -1236,16 +1304,42 @@ const handleSaveIdentity = async () => {
           assistant_name: assistantName,
           user_name: userName,
           custom_color: '',
-          voice: voiceName
+          voice: voiceName,
+          // Salvar aqui e o CHARON: o nome do usuario tem coluna propria por
+          // assistente, entao isto nao muda o nome usado pelo Jarvis.
+          assistente: 'charon',
         })
       });
-      // Forca reconexao do Charon para usar novo identity
-      await fetch('/voice/disconnect-all', { method: 'POST' }).catch(() => {});
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+
+      // ATUALIZA OS REFS AGORA — nao espere o efeito do React.
+      //
+      // BUG DO "escolhi Charon e quem fala e Aoede": o `voiceNameRef` era
+      // sincronizado por um `useEffect`, que roda DEPOIS do commit. Como a
+      // conexao le o REF (e nao o state), a sessao podia ser reaberta com a voz
+      // ANTERIOR — o usuario trocava, salvava, e continuava ouvindo a voz velha.
+      // Mesma armadilha dos callbacks de microfone/conexao: eles leem ref.
+      voiceNameRef.current = voiceName;
+      assistantNameRef.current = assistantName;
+      userNameRef.current = userName;
+      tenantSet('charon_voice', voiceName);
+      tenantSet('charon_assistant_name', assistantName);
+      tenantSet('charon_user_name', userName);
+
+      // Reconecta AQUI, pelo caminho normal (fecha e reabre), em vez de confiar
+      // no `disconnect-all` do servidor: fechar pelo servidor nao garante que o
+      // navegador reabra, e a troca de voz/nome so vale numa sessao nova.
+      if (startedRef.current) {
+        disconnectVoice();
+        addActivity('Identidade aplicada — reabrindo a sessao', 'system');
+        setTimeout(() => connectVoiceRef.current(), 600);
+      }
     } catch (e) {
-      console.error('Erro ao salvar identity:', e);
+      alert(`Nao consegui salvar a identidade: ${(e as Error)?.message || 'falha de rede'}`);
+      return;
     }
-    
-    alert('Identidade salva! Aplicada na proxima vez que reiniciar o Charon.');
+
+    alert('Identidade salva e aplicada nesta conversa.');
 };
 
   // ─── Conversation management ───────────────────────────────────
@@ -1343,6 +1437,29 @@ const handleSaveIdentity = async () => {
       renameConversation(convId, newName.trim());
       setConversations(getConversations());
     }
+  };
+
+  /**
+   * Abre a arvore para o usuario ESCOLHER uma conversa salva.
+   *
+   * Usado pelo botao "Continuar uma conversa" da tela inicial. Antes esse botao
+   * so mandava expandir o workspace ativo — que ja estava aberto — entao o
+   * usuario clicava e NADA acontecia (o Charon continuava parado).
+   *
+   * Agora: expande TODAS as raizes que tem conversa (nao so a ativa — o usuario
+   * pode ter sessoes em outra), abre as raizes que estao fechadas e rola a
+   * arvore para a vista, porque as raizes nascem fechadas.
+   */
+  const abrirArvoreParaEscolher = () => {
+    const todas: Record<string, boolean> = {};
+    for (const c of conversations) {
+      todas[c.workspace || WORKSPACE_PADRAO] = true;
+    }
+    setWsExpandidos(todas);
+    // Deixa a arvore visivel: sem isto o usuario teria que procurar onde abriu.
+    try {
+      arvoreRef.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    } catch { /* navegador antigo: so nao rola */ }
   };
 
   const formatConvTime = (ts: number) => {
@@ -1489,8 +1606,16 @@ const handleSaveIdentity = async () => {
           {/* RIGHT PANEL — Voz (escuta + respostas do Charon) */}
           <div style={{ ...s.rightPanel, width: rightPanelWidth }} className="charon-right-panel">
             {/* Conversation selector bar */}
+            {/*
+              AQUI HAVIA UM "+" QUE CRIava CONVERSA — DUPLICADO.
+              Ele e o botao "+ Novo chat" da arvore chamavam a MESMA funcao
+              (`newConversation`). O usuario viu os dois na tela e perguntou qual
+              usar. Ficou um so: o "+ Novo chat", explicito, na arvore.
+
+              Esta barra agora so MOSTRA o estado: nome da sessao + indicador de
+              contexto. Era o unico `+` que exigia adivinhacao ("+ do que?").
+            */}
             <div style={{ padding: '4px 8px', borderBottom: '1px solid #222', display: 'flex', alignItems: 'center', gap: 4, position: 'relative' as const }}>
-              <button onClick={newConversation} title="Nova conversa" style={{ background: 'none', border: 'none', color: '#b478ff', fontSize: 14, cursor: 'pointer', padding: '2px 4px', lineHeight: 1 }}>+</button>
               <button
                 onClick={() => setShowConvMenu(!showConvMenu)}
                 style={{
@@ -1500,7 +1625,7 @@ const handleSaveIdentity = async () => {
                   padding: '2px 4px',
                 }}
               >
-                {activeConv?.name || 'Nova conversa'}
+                {activeConv?.name || 'Nenhuma conversa escolhida'}
               </button>
               {/* Indicador de contexto: deixa claro se o Charon esta num assunto
                   novo ou se esta lembrando da conversa escolhida. Sem isto o
@@ -1527,37 +1652,59 @@ const handleSaveIdentity = async () => {
                 e a SESSAO de voz: a setinha na raiz abre as sessoes, e o "..."
                 de cada uma permite renomear, excluir ou BAIXAR (exporta a
                 transcricao em .md). */}
-            <div style={{ borderBottom: '1px solid #1e1e1e', flexShrink: 0, maxHeight: '32vh', overflowY: 'auto' }}>
+            <div ref={arvoreRef} style={{ borderBottom: '1px solid #1e1e1e', flexShrink: 0, maxHeight: '32vh', overflowY: 'auto' }}>
               {/* ── AS DUAS ESCOLHAS DE CONTEXTO ────────────────────────────
                   Pedido do usuario: "eu escolho do lado direito no workspace
                   novo chat ou clico em algum historico registrado das conversas
                   anteriores para que ele ja comece com um novo contexto ou com
                   aquele contexto salvo".
 
-                  Antes o "+" era um caractere solto no canto da barra e passava
-                  despercebido; agora a escolha e explicita e fica no topo da
-                  arvore, junto dos workspaces (igual ao painel do DSH). */}
-              <div
-                onClick={newConversation}
-                title="Comecar uma sessao nova, sem contexto anterior"
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  margin: '6px 8px', padding: '5px 8px', borderRadius: 4,
-                  cursor: 'pointer',
-                  background: modoInicio === 'novo' ? 'rgba(180,120,255,0.16)' : 'rgba(180,120,255,0.07)',
-                  border: `1px solid ${modoInicio === 'novo' ? 'rgba(180,120,255,0.55)' : 'rgba(180,120,255,0.25)'}`,
-                  color: '#c9a6ff', fontSize: 10, fontWeight: 600,
-                }}>
-                <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
-                <span style={{ flex: 1 }}>Novo chat</span>
-                <span style={{ fontSize: 8, color: '#7a6a95', fontWeight: 400 }}>sem contexto</span>
+                  E, vendo na tela: "eu digo estes botoes deixar la encima ->
+                  + Novo chat / Continuar uma conversa".
+
+                  Ficam AQUI, no topo da arvore, lado a lado e compactos — nao
+                  no meio do painel. Assim a escolha esta sempre visivel, sem
+                  empurrar a arvore nem cobrir a conversa. */}
+              <div style={{ display: 'flex', gap: 6, padding: '6px 8px 2px' }}>
+                <button
+                  onClick={newConversation}
+                  title="Sessao nova, sem contexto anterior. Ele cumprimenta e comeca do zero."
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
+                    background: modoInicio === 'novo' ? 'rgba(180,120,255,0.20)' : 'rgba(180,120,255,0.07)',
+                    border: `1px solid ${modoInicio === 'novo' ? 'rgba(180,120,255,0.55)' : 'rgba(180,120,255,0.25)'}`,
+                    color: '#c9a6ff', fontSize: 10, fontWeight: 600,
+                  }}>
+                  <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
+                  <span>Novo chat</span>
+                </button>
+                <button
+                  onClick={abrirArvoreParaEscolher}
+                  title={`Abrir as ${conversations.length} conversas salvas. Escolha uma e o Charon recebe aquele historico, retomando de onde pararam.`}
+                  style={{
+                    flex: 1, display: 'flex', alignItems: 'center', gap: 5,
+                    padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
+                    background: modoInicio === 'historico' ? 'rgba(255,255,255,0.10)' : 'rgba(255,255,255,0.04)',
+                    border: `1px solid ${modoInicio === 'historico' ? '#555' : '#2e2e2e'}`,
+                    color: '#bbb', fontSize: 10, fontWeight: 600,
+                  }}>
+                  <span style={{ fontSize: 11, lineHeight: 1 }}>&#8635;</span>
+                  <span>Continuar</span>
+                  {conversations.length > 0 && (
+                    <span style={{ marginLeft: 'auto', fontSize: 8, color: '#666' }}>{conversations.length}</span>
+                  )}
+                </button>
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px 2px', fontSize: 8, color: '#5a5a5a', letterSpacing: 1, textTransform: 'uppercase' as const }}>
                 <span>workspaces</span>
                 <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{conversations.length}</span>
-                <button onClick={() => setEditandoWorkspace(v => !v)} title="Nova raiz (workspace)"
-                  style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 11, padding: '0 2px', lineHeight: 1 }}>+</button>
+                {/* Este "+" cria uma PASTA (raiz), nao uma conversa.
+                    Ficava ambiguo ao lado do "+ Novo chat": os dois eram "+".
+                    Agora diz o que faz. */}
+                <button onClick={() => setEditandoWorkspace(v => !v)} title="Criar uma nova pasta (raiz) para organizar conversas"
+                  style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 9, padding: '0 2px', lineHeight: 1 }}>+ pasta</button>
               </div>
 
               {editandoWorkspace && (
@@ -1567,6 +1714,7 @@ const handleSaveIdentity = async () => {
                       if (e.key === 'Enter' && novoWorkspace.trim()) {
                         const w = novoWorkspace.trim();
                         setWorkspaceAtivo(w); tenantSet('charon_workspace', w);
+                        workspaceAtivoRef.current = w;
                         setTodosWorkspaces(prev => prev.includes(w) ? prev : [...prev, w].sort((a, b) => a.localeCompare(b, 'pt-BR')));
                         setWsExpandidos(p => ({ ...p, [w]: true }));
                         setNovoWorkspace(''); setEditandoWorkspace(false);
@@ -1581,7 +1729,17 @@ const handleSaveIdentity = async () => {
               {todosWorkspaces.map(ws => {
                 const doWs = conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws);
                 if (doWs.length === 0 && ws !== workspaceAtivo) return null;
-                const aberto = wsExpandidos[ws] !== false;
+                // A raiz comeca FECHADA (`=== true`, nao `!== false`).
+                //
+                // PEDIDO DO USUARIO: "o workspace poderia aparecer ao clicar nele
+                // ou o workspace iniciar com a raiz escondida; ao clicar neste
+                // botao a raiz expandiria".
+                //
+                // Antes ela abria sozinha e ocupava o painel inteiro com a lista
+                // de sessoes, empurrando a escolha de contexto para fora da tela.
+                // Fechada por padrao, a arvore fica com a altura de duas linhas e a
+                // lista aparece quando o usuario PEDE (um clique na raiz).
+                const aberto = wsExpandidos[ws] === true;
                 return (
                   <div key={ws}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 3, padding: '3px 8px', cursor: 'pointer' }}
@@ -1677,29 +1835,30 @@ const handleSaveIdentity = async () => {
                   {modoInicio === 'escolher' ? (
                     // Tela de ESCOLHA: o Charon nao liga sozinho. Pedido do
                     // usuario: "nao faz nenhuma das duas ate eu escolher".
-                    <div style={{ maxWidth: 460, textAlign: 'left' }}>
+                    //
+                    // Os BOTOES nao ficam mais aqui — o usuario pediu: "eu digo
+                    // estes botoes deixar la encima". Eles agora vivem no topo do
+                    // painel direito, junto dos workspaces, e ficam visiveis o
+                    // tempo todo. Aqui so explicamos o que fazer, apontando para
+                    // onde os botoes estao (sem repeti-los).
+                    <div style={{ maxWidth: 380, textAlign: 'left' }}>
                       <p style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 600, color: '#c9a6ff' }}>
                         Como voce quer comecar?
                       </p>
-                      <p style={{ margin: '0 0 14px', fontSize: 12, opacity: 0.7, lineHeight: 1.5 }}>
+                      <p style={{ margin: '0 0 10px', fontSize: 12, opacity: 0.7, lineHeight: 1.6 }}>
                         O Charon esta parado esperando voce escolher. Ele so liga
                         depois da escolha — assim nao abre falando sozinho.
                       </p>
-                      <button onClick={newConversation}
-                        style={{ display: 'block', width: '100%', textAlign: 'left', marginBottom: 8, padding: '10px 14px', background: 'rgba(180,120,255,0.14)', color: '#e0d0ff', border: '1px solid rgba(180,120,255,0.45)', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
-                        + Novo chat
-                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.75, marginTop: 3 }}>
-                          Sessao nova, sem contexto anterior. Ele cumprimenta e comeca do zero.
-                        </div>
-                      </button>
-                      <button onClick={() => { setActiveTab('chat'); setWsExpandidos(p => ({ ...p, [workspaceAtivo]: true })); }}
-                        style={{ display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px', background: 'rgba(255,255,255,0.04)', color: '#ccc', border: '1px solid #333', borderRadius: 6, fontSize: 13, cursor: 'pointer', fontWeight: 600 }}>
-                        &#8635; Continuar uma conversa
-                        <div style={{ fontSize: 11, fontWeight: 400, opacity: 0.75, marginTop: 3 }}>
-                          Clique numa sessao da arvore ali em cima ({conversations.length} salvas).
-                          O Charon recebe aquele historico e retoma de onde pararam.
-                        </div>
-                      </button>
+                      <p style={{ margin: '0 0 6px', fontSize: 11.5, lineHeight: 1.6, opacity: 0.85 }}>
+                        <span style={{ color: '#c9a6ff', fontWeight: 600 }}>+ Novo chat</span>
+                        {' '}(no topo, ao lado de workspaces) — sessao nova, sem contexto
+                        anterior. Ele cumprimenta e comeca do zero.
+                      </p>
+                      <p style={{ margin: 0, fontSize: 11.5, lineHeight: 1.6, opacity: 0.85 }}>
+                        <span style={{ color: '#bbb', fontWeight: 600 }}>&#8635; Continuar</span>
+                        {' '}— abre as {conversations.length} conversas salvas. Escolha uma e
+                        o Charon recebe aquele historico, retomando de onde pararam.
+                      </p>
                     </div>
                   ) : micError ? (
                     // Microfone falhou: a conexao esta OK, mas nao da para falar.
@@ -1771,7 +1930,7 @@ const handleSaveIdentity = async () => {
                 ))
               )}
             </div>
-            <div style={s.rightFooter}>
+            <div style={{ ...s.rightFooter, flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                 <span style={{ width: 5, height: 5, borderRadius: '50%', background: sc }} />
                 <span style={{ fontSize: 10, color: sc }}>
@@ -1780,6 +1939,15 @@ const handleSaveIdentity = async () => {
               </div>
               <span style={{ fontSize: 10, color: '#999' }}>·</span>
               <span style={{ fontSize: 10, color: '#999' }}>Voz: {voiceName}</span>
+              {/* Monitor de CPU / RAM / VRAM, abaixo do "Charon ativo".
+                  PEDIDO: "e no charon as barras de processos deixe abaixo do lado
+                  direito da descricao -> Charon ativo".
+                  `flexBasis: 100%` forca a quebra de linha: o rodape e uma linha
+                  flex, e sem isso o monitor ficaria ao LADO do texto em vez de
+                  embaixo. Reusa o MESMO componente do Jarvis/App (um lugar so). */}
+              <div style={{ flexBasis: '100%', marginTop: 3 }}>
+                <MiniMonitors />
+              </div>
             </div>
           </div>
         </div>

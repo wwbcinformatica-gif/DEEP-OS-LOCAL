@@ -276,7 +276,32 @@ export const AGENTS_LIST: AgentInfo[] = [
 ];
 
 // ─── API ───────────────────────────────────────────────────────────────
-export const API_BASE = 'http://localhost:8001';
+/**
+ * Base das chamadas de API.
+ *
+ * POR QUE NAO E MAIS `'http://localhost:8001'` FIXO
+ *
+ * Com o endereco fixo, o `MiniMonitors` (que lia `${API_BASE}/monitor`) nao
+ * funcionava no modo SaaS:
+ *
+ *   1. aberto por `http://localhost:5176`, o navegador ia direto na 8001 e
+ *      escapava do proxy do Vite (funcionava por sorte, sem passar pelo
+ *      middleware de seguranca);
+ *   2. aberto no site publicado (HTTPS), `http://localhost:8001` aponta para a
+ *      MAQUINA DO USUARIO — e o navegador ainda bloqueia `http://` dentro de
+ *      pagina `https://` (conteudo misto). Resultado: barra nenhuma.
+ *
+ * Regra agora:
+ *   - servido por um servidor web (http/https) -> caminho RELATIVO, que passa
+ *     pelo proxy do Vite (dev) ou pelo nginx (producao). E o que todos os
+ *     componentes do SaaS ja fazem (`fetch('/api/...')`);
+ *   - rodando de outra forma (ex.: arquivo local, Electron) -> mantem
+ *     `http://localhost:8001`, que era o comportamento antigo.
+ */
+export const API_BASE =
+  typeof window !== 'undefined' && /^https?:$/.test(window.location.protocol)
+    ? ''
+    : 'http://localhost:8001';
 
 // ─── Defaults ──────────────────────────────────────────────────────────
 export const DEFAULT_PROVIDER: Provider = 'openclaude';

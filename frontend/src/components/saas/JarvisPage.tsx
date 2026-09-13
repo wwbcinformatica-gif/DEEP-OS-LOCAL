@@ -401,6 +401,9 @@ const PROVIDERS = [
 ];
 
 import { renderMarkdown, renderMessageContent } from './markdownRenderer';
+// Monitor de CPU/RAM/VRAM. Reusa o componente que o App.tsx ja usa — um lugar so
+// (a versao duplicada que eu tinha escrito foi apagada; ver comentario abaixo).
+import MiniMonitors from '../MiniMonitors';
 
 const LANG_LABELS: Record<string, string> = {
   python: 'Python', javascript: 'JavaScript', typescript: 'TypeScript',
@@ -410,6 +413,25 @@ const LANG_LABELS: Record<string, string> = {
   json: 'JSON', yaml: 'YAML', markdown: 'Markdown', shell: 'Shell',
 };
 
+
+/**
+ * Monitor de recursos (CPU / RAM / VRAM) — a barrinha discreta embaixo dos
+ * botoes de microfone/falante, ao lado do "Jarvis ativo".
+ *
+ * PEDIDO DO USUARIO: "uma coisa que eu achava legal era ter la acima barra de
+ * processos uso gpu uso memoria e uso de vram gpu", e depois: "tem que ficar
+ * embaixo do lado direito dos botoes".
+ *
+ * AQUI HAVIA UM COMPONENTE NOVO (MiniMonitor) ESCRITO POR MIM — APAGADO.
+ * O projeto JA TINHA `components/MiniMonitors.tsx` fazendo exatamente isto
+ * (mesmo endpoint, mesmo intervalo de 5 s), usado no `App.tsx`. Criar outro era
+ * a armadilha nº 0 do docs/CONTINUAR.md ("codigo duplicado: corrija nos dois
+ * lugares"): duas telas com o mesmo medidor, e a proxima correcao entrando em
+ * uma so. Agora as duas usam o MESMO componente.
+ *
+ * As cores usam as variaveis de `styles.css` (`--muted`, `--bg-4`), que o
+ * SaaSEntry tambem importa — conferido antes de reusar.
+ */
 
 const JarvisPage: React.FC = () => {
   const [conversations, setConversations] = useState<Conversation[]>(() => getConversations());
@@ -460,6 +482,10 @@ const JarvisPage: React.FC = () => {
   // O padrao desta pagina e "Jarvis" (o do Charon e "DEEP-OS").
   const [assistantName, setAssistantName] = useState(tenantGet('jarvis_assistant_name') || 'Jarvis');
   const assistantNameRef = useRef(tenantGet('jarvis_assistant_name') || 'Jarvis');
+  // Nome do USUARIO no Jarvis. Separado do Charon de proposito: cada assistente
+  // tem o seu (decisao do usuario: "o jarvis e jarvis ele nao tem charon").
+  // Vai para o system prompt do chat, para ele tratar a pessoa pelo nome certo.
+  const [userName, setUserName] = useState(tenantGet('jarvis_user_name') || '');
   const [instanceConfig, setInstanceConfig] = useState<any>(null);
   const [dynamicModels, setDynamicModels] = useState<{id: string, label: string, hasVision?: boolean}[]>([]);
   const [loadingModels, setLoadingModels] = useState(false);
@@ -612,10 +638,12 @@ const JarvisPage: React.FC = () => {
   }, [transcripts, activeConvId]);
 
   useEffect(() => {
-    // Nome do assistente vem de Configuracoes -> Identidade (mesma fonte do Charon).
-    // Fallback: o que ja ficou gravado no tenant.
+    // Identidade do tenant. `assistente=jarvis`: o NOME DO USUARIO tem coluna
+    // propria por assistente — o Jarvis trata a pessoa pelo nome que foi
+    // definido NO JARVIS, sem herdar o do Charon. O nome do ASSISTENTE e
+    // compartilhado (decisao do usuario).
     const token = tenantGet('saas_token') || localStorage.getItem('saas_token');
-    fetch('/api/config/identity', {
+    fetch('/api/config/identity?assistente=jarvis', {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     })
       .then(r => r.ok ? r.json() : null)
@@ -625,6 +653,10 @@ const JarvisPage: React.FC = () => {
         setAssistantName(name);
         assistantNameRef.current = name;
         tenantSet('jarvis_assistant_name', name);
+        // Nome do usuario no Jarvis (usado no prompt do chat).
+        const user = data.user_name || '';
+        setUserName(user);
+        tenantSet('jarvis_user_name', user);
       })
       .catch(() => { /* mantem o valor gravado no tenant */ });
   }, []);
@@ -817,15 +849,73 @@ const JarvisPage: React.FC = () => {
   const toggleGpu = async (provider: string) => {
     const newVal = !gpuMode[provider];
     setGpuMode(prev => ({ ...prev, [provider]: newVal }));
-    tenantSet(`jarvis_gpu_${provider}`, String(newVal));
     try {
-      await fetch(`/${provider}/gpu`, {
+      // O PAYLOAD TEM DE SER {gpu_enabled, gpu_layers}.
+      //
+      // BUG CORRIGIDO: aqui ia `{ use_gpu: newVal }`. Os dois endpoints
+      // (`/llamacpp/gpu` e `/ollama/gpu`) validam com um modelo Pydantic que
+      // exige `gpu_enabled`, entao o servidor respondia **422** e a
+      // configuracao NUNCA era salva. O botao mudava de cor, o usuario achava
+      // que tinha configurado, e nada acontecia — em nenhum dos dois provedores.
+      // O `catch {}` vazio escondia ate o erro de rede, o mesmo tipo de defeito
+      // do `.catch(() => {})` que ja escondeu o 401 da VPS neste projeto.
+      //
+      // `gpu_layers: -1` = o llama.cpp/ollama decide quantas camadas cabem na
+      // placa. Nao fixar um numero: o usuario troca de placa de video.
+      const resp = await fetch(`/${provider}/gpu`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ use_gpu: newVal }),
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ gpu_enabled: newVal, gpu_layers: -1 }),
       });
-    } catch (e) {}
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      tenantSet(`jarvis_gpu_${provider}`, String(newVal));
+      addProcess(
+        'info',
+        `${provider === 'ollama' ? 'Ollama' : 'llama.cpp'}: ${newVal ? 'GPU ligada' : 'CPU (sem GPU)'}`,
+        newVal
+          ? 'O processo usa a placa de video. Vale na proxima vez que o modelo carregar.'
+          : 'Passa a rodar na CPU: mais lento, mas funciona sem placa compativel.',
+      );
+    } catch (e: any) {
+      // Volta o botao ao estado anterior: a tela nao pode mentir.
+      setGpuMode(prev => ({ ...prev, [provider]: !newVal }));
+      addProcess(
+        'tool_error',
+        `Nao consegui mudar a GPU do ${provider}`,
+        `${e?.message || 'falha de rede'} — o valor anterior foi mantido.`,
+      );
+    }
   };
+
+  useEffect(() => {
+    // Le a configuracao de GPU REAL do servidor.
+    //
+    // BUG: o estado inicial vinha so do localStorage (`jarvis_gpu_*`). Se o
+    // config.yaml fosse mudado por outro caminho (a mao, outro navegador, outro
+    // computador), o botao mostraria um valor que nao corresponde ao que o
+    // servidor vai usar — e como o salvamento tambem nao funcionava (payload
+    // errado), a tela mentia nos dois sentidos. Agora quem manda e o servidor.
+    let ativo = true;
+    (async () => {
+      try {
+        const r = await fetch('/llamacpp/gpu', { headers: authHeaders() });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!ativo || typeof j?.gpu_enabled !== 'boolean') return;
+        setGpuMode(prev => ({ ...prev, llamacpp: j.gpu_enabled }));
+        tenantSet('jarvis_gpu_llamacpp', String(j.gpu_enabled));
+      } catch { /* sem servidor: fica o que esta no localStorage */ }
+      try {
+        const r = await fetch('/ollama/gpu', { headers: authHeaders() });
+        if (!r.ok) return;
+        const j = await r.json();
+        if (!ativo || typeof j?.gpu_enabled !== 'boolean') return;
+        setGpuMode(prev => ({ ...prev, ollama: j.gpu_enabled }));
+        tenantSet('jarvis_gpu_ollama', String(j.gpu_enabled));
+      } catch { /* idem */ }
+    })();
+    return () => { ativo = false; };
+  }, []);
 
   const startListening = () => {
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
@@ -1062,6 +1152,9 @@ const JarvisPage: React.FC = () => {
           temperature: instanceConfig?.temperature ?? 0.7,
           system_prompt: instanceConfig?.system_prompt || '',
           session_id: `saas-${tenantGet('saas_user') || localStorage.getItem('saas_user') || 'default'}`,
+          // Diz ao backend QUEM esta falando. O nome do usuario e separado por
+          // assistente: sem isto o Jarvis usaria o nome definido no Charon.
+          assistente: 'jarvis',
         }),
       });
 
@@ -1388,8 +1481,11 @@ const JarvisPage: React.FC = () => {
       <div style={s.chatLayout}>
         <div style={s.leftPanel}>
           <div style={s.convBar}>
-            <button onClick={newConversation} title="Nova conversa (limpa) — nao apaga nenhuma conversa do historico" style={s.convNewBtn}>+</button>
-            <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nova conversa'}</button>
+            {/* O "+" que criava conversa SAIU daqui.
+                Ele e o botao "+ Nova conversa" da arvore faziam a MESMA coisa —
+                o usuario via dois "+" e nao sabia qual usar. O botao explicito
+                na arvore (abaixo) e agora o unico caminho. */}
+            <button onClick={() => setShowConvMenu(!showConvMenu)} style={s.convMenuBtn}>{activeConv?.name || 'Nenhuma conversa'}</button>
             <span style={{ fontSize: 9, color: '#666' }}>{messages.length}</span>
             {/* O CHIP DE WORKSPACE FOI REMOVIDO DAQUI.
                 Ele criava raiz num lugar e a arvore criava noutro — o usuario
@@ -1553,6 +1649,23 @@ const JarvisPage: React.FC = () => {
             borderBottom: '1px solid #1e1e1e', flexShrink: 0,
             maxHeight: '38vh', overflowY: 'auto',
           }}>
+            {/* Criar conversa: botao EXPLICITO, no topo da arvore.
+                Era um "+" solto na barra de cima, que o usuario tinha de
+                adivinhar. Agora diz o que faz, e o unico caminho para isso. */}
+            <div
+              onClick={newConversation}
+              title="Comecar uma conversa nova (nao apaga nenhuma do historico)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6,
+                margin: '6px 8px', padding: '5px 8px', borderRadius: 4, cursor: 'pointer',
+                background: 'rgba(0,217,255,0.07)',
+                border: '1px solid rgba(0,217,255,0.25)',
+                color: '#7fe6ff', fontSize: 10, fontWeight: 600,
+              }}>
+              <span style={{ fontSize: 12, lineHeight: 1 }}>+</span>
+              <span style={{ flex: 1 }}>Nova conversa</span>
+            </div>
+
             <div style={{
               display: 'flex', alignItems: 'center', gap: 4,
               padding: '4px 8px 2px', fontSize: 8, color: '#5a5a5a',
@@ -1560,9 +1673,10 @@ const JarvisPage: React.FC = () => {
             }}>
               <span>workspaces</span>
               <span style={{ marginLeft: 'auto', opacity: 0.7 }}>{conversations.length}</span>
+              {/* Este "+" cria uma PASTA (raiz), nao uma conversa — agora diz isso. */}
               <button onClick={() => setEditandoWorkspace(v => !v)}
-                title="Nova raiz (workspace)"
-                style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 11, padding: '0 2px', lineHeight: 1 }}>+</button>
+                title="Criar uma nova pasta (raiz) para organizar conversas"
+                style={{ background: 'none', border: 'none', color: '#666', cursor: 'pointer', fontSize: 9, padding: '0 2px', lineHeight: 1 }}>+ pasta</button>
             </div>
 
             {/* Criar workspace */}
@@ -1589,7 +1703,13 @@ const JarvisPage: React.FC = () => {
               // Mostra a raiz mesmo vazia se for a ativa (para o usuario nao
               // achar que a raiz nova nao foi criada).
               if (doWs.length === 0 && ws !== workspaceAtivo) return null;
-              const aberto = wsExpandidos[ws] !== false; // padrao: expandido
+              // A raiz comeca FECHADA (`=== true`, nao `!== false`).
+              //
+              // Mesma mudanca do Charon, pedida pelo usuario: "o workspace
+              // poderia aparecer ao clicar nele ou o workspace iniciar com a
+              // raiz escondida; ao clicar neste botao a raiz expandiria".
+              // Aberta por padrao, a lista de conversas ocupava o painel inteiro.
+              const aberto = wsExpandidos[ws] === true;
               return (
                 <div key={ws}>
                   {/* Raiz (workspace) */}
@@ -1713,21 +1833,30 @@ const JarvisPage: React.FC = () => {
                 placeholder={isListening ? 'Ouvindo...' : 'Digite sua mensagem...'}
                 style={{ ...s.textarea, height: textareaHeight, borderColor: isListening ? '#ef4444' : '#333' }}
                 disabled={isTyping} />
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
-                    {isListening ? '\u23F9' : '\uD83C\uDF99'}
-                  </button>
-                  <button onClick={() => { if (isSpeaking) stopSpeaking(); setAutoSpeakEnabled(!autoSpeakEnabled); }} style={{ ...s.iconBtn, background: autoSpeakEnabled ? '#0c0' : '#1a1a2e', color: autoSpeakEnabled ? '#fff' : '#666' }} title={autoSpeakEnabled ? 'Falante ON (clique para desativar)' : 'Falante OFF (clique para ativar)'}>
-                    {autoSpeakEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07'}
-                  </button>
-                  <button onClick={stopGeneration} disabled={!isTyping} style={{ ...s.iconBtn, background: isTyping ? '#ef4444' : '#1a1a2e', color: isTyping ? '#fff' : '#666', opacity: isTyping ? 1 : 0.4 }} title="Parar geracao">
-                    {'\u23F9'}
-                  </button>
-                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
-                  <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
-                    {isTyping ? 'Processando...' : 'Jarvis ativo'}
-                  </span>
+              <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between' }}>
+                <div style={{ display: 'flex', flexDirection: 'column' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                    <button onClick={isListening ? stopListening : startListening} style={{ ...s.iconBtn, background: isListening ? '#ef4444' : '#1a1a2e', color: isListening ? '#fff' : '#ccc' }} title={isListening ? 'Parar' : 'Microfone'}>
+                      {isListening ? '\u23F9' : '\uD83C\uDF99'}
+                    </button>
+                    <button onClick={() => { if (isSpeaking) stopSpeaking(); setAutoSpeakEnabled(!autoSpeakEnabled); }} style={{ ...s.iconBtn, background: autoSpeakEnabled ? '#0c0' : '#1a1a2e', color: autoSpeakEnabled ? '#fff' : '#666' }} title={autoSpeakEnabled ? 'Falante ON (clique para desativar)' : 'Falante OFF (clique para ativar)'}>
+                      {autoSpeakEnabled ? '\uD83D\uDD0A' : '\uD83D\uDD07'}
+                    </button>
+                    <button onClick={stopGeneration} disabled={!isTyping} style={{ ...s.iconBtn, background: isTyping ? '#ef4444' : '#1a1a2e', color: isTyping ? '#fff' : '#666', opacity: isTyping ? 1 : 0.4 }} title="Parar geracao">
+                      {'\u23F9'}
+                    </button>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: isTyping ? '#f59e0b' : '#0c0', display: 'inline-block' }} />
+                    <span style={{ fontSize: 10, color: isTyping ? '#f59e0b' : '#0c0', fontWeight: 600 }}>
+                      {isTyping ? 'Processando...' : 'Jarvis ativo'}
+                    </span>
+                  </div>
+                  {/* Monitor de CPU / RAM / VRAM, embaixo dos botoes.
+                      Pedido do usuario: "tem que ficar embaixo do lado direito
+                      dos botoes". Fica na mesma coluna do "Jarvis ativo" para
+                      nao empurrar o botao de enviar. */}
+                  <div style={{ marginTop: 3 }}>
+                    <MiniMonitors />
+                  </div>
                 </div>
                 <button style={s.sendBtn} onClick={handleSendMessage} disabled={!input.trim() || isTyping}>
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2250,6 +2379,74 @@ const JarvisPage: React.FC = () => {
                   <input type="range" min="0" max="100" step="5" value={voicePitch}
                     onChange={(e) => { const pitch = parseInt(e.target.value); setVoicePitch(pitch); tenantSet('jarvis_voice_pitch', String(pitch)); }}
                     style={{ flex: 1 }} />
+                </div>
+              </div>
+
+              <div style={s.settingsSection}>
+                <div style={s.sectionTitle}>Identidade</div>
+                {/* NOME DO USUARIO DESTE ASSISTENTE.
+                    O Jarvis tem o nome DELE, separado do Charon (decisao do
+                    usuario: "o jarvis e jarvis ele nao tem charon"). O nome do
+                    ASSISTENTE continua sendo um so, o mesmo do Charon — por isso
+                    aparece aqui como campo compartilhado, com a nota. */}
+                <div style={s.settingsRow}>
+                  <label style={s.settingsLabel}>Seu nome (Jarvis)</label>
+                  <input
+                    type="text"
+                    value={userName}
+                    onChange={(e) => setUserName(e.target.value)}
+                    placeholder="Como o Jarvis chama voce"
+                    style={{ ...s.configInput, flex: 1 }}
+                  />
+                </div>
+                <div style={s.settingsRow}>
+                  <label style={s.settingsLabel}>Nome do assistente</label>
+                  <input
+                    type="text"
+                    value={assistantName}
+                    onChange={(e) => setAssistantName(e.target.value)}
+                    placeholder="Nome do assistente"
+                    style={{ ...s.configInput, flex: 1 }}
+                  />
+                </div>
+                <div style={{ fontSize: 10, color: '#555', marginTop: 4 }}>
+                  O nome do assistente vale para o Jarvis e para o Charon. O seu
+                  nome e separado: cada assistente tem o dele.
+                </div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                  <button
+                    onClick={async () => {
+                      try {
+                        const token = tenantGet('saas_token') || localStorage.getItem('saas_token');
+                        const resp = await fetch('/api/config/identity', {
+                          method: 'PUT',
+                          headers: {
+                            'Content-Type': 'application/json',
+                            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+                          },
+                          body: JSON.stringify({
+                            assistant_name: assistantName,
+                            user_name: userName,
+                            custom_color: '',
+                            assistente: 'jarvis',
+                          }),
+                        });
+                        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+                        tenantSet('jarvis_assistant_name', assistantName);
+                        tenantSet('jarvis_user_name', userName);
+                        assistantNameRef.current = assistantName;
+                        addProcess('info', 'Identidade salva',
+                          `O Jarvis vai te chamar de "${userName || 'usuario'}".`);
+                      } catch (e: any) {
+                        // Sem este tratamento um 401 passaria em silencio e a tela
+                        // diria que salvou (foi o defeito do botao de GPU).
+                        addProcess('tool_error', 'Nao consegui salvar a identidade',
+                          e?.message || 'falha de rede');
+                      }
+                    }}
+                    style={{ ...s.saveBtn, background: '#1e3a2e', color: '#7c9' }}>
+                    Salvar identidade
+                  </button>
                 </div>
               </div>
 

@@ -1,22 +1,13 @@
 identity:
-  assistant_name: Charon
+  assistant_name: fabio
   custom_color: ''
   user_name: Wilson
   voice: Charon
 llamacpp:
   gpu_enabled: true
-  # -1 = o llama.cpp decide quantas camadas cabem na placa (auto-fit).
-  #
-  # ESTAVA 999 ("todas as camadas na GPU"). Numa RTX 3060 de 12 GB isso fazia o
-  # carregamento do modelo de 27B morrer com:
-  #     ggml_vulkan: vk::Device::allocateMemory: ErrorOutOfDeviceMemory
-  # Com -1 o mesmo modelo de 13 GB carrega (o que nao couber vai para a CPU).
-  #
-  # NAO volte para 999, nem coloque um numero fixo: o usuario troca de placa de
-  # video e o numero teria de mudar junto. Com -1 ele se adapta sozinho.
   gpu_layers: -1
 ollama:
   gpu_enabled: true
   gpu_layers: -1
 voice:
-  charon_toolset: full
+  charon_toolset: basic

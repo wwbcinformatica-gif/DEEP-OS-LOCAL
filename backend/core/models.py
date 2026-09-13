@@ -20,6 +20,11 @@ class Message(BaseModel):
     is_correction: bool = False  # True quando usuario interrompe com nova mensagem (correcao)
     assess_urgency: bool = False  # True quando frontend pede avaliacao de urgencia (nao interrompe, apenas classifica)
     current_task_summary: str = ""  # Resumo da tarefa em execucao (para contexto da triagem)
+    # Qual assistente esta falando ("jarvis" no chat de texto). O NOME DO USUARIO
+    # e separado por assistente: o Jarvis trata a pessoa pelo nome definido NO
+    # JARVIS, sem herdar o do Charon (decisao do usuario). O nome do ASSISTENTE e
+    # compartilhado. Vazio = usa o campo compartilhado (compatibilidade).
+    assistente: str = ""
 
 class BrainArtifact(BaseModel):
     title: str

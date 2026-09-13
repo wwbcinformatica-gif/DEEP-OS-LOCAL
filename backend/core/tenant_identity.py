@@ -283,7 +283,7 @@ def _default_voice() -> str:
     return DEFAULT_VOICE
 
 
-def get_identity(tenant_id: Optional[str]) -> dict:
+def get_identity(tenant_id: Optional[str], assistente: Optional[str] = None) -> dict:
     """
     Retorna a identidade do tenant.
 
@@ -292,6 +292,21 @@ def get_identity(tenant_id: Optional[str]) -> dict:
 
     Inclui `voice`: a voz escolhida e preferencia PESSOAL. Antes era global,
     entao um assinante trocando a voz mudava a de todos os outros.
+
+    `assistente` ("charon" | "jarvis" | None) escolhe o NOME DO USUARIO.
+
+    ⚠️ POR QUE EXISTE ESTE PARAMETRO
+    O Charon e o Jarvis sao assistentes distintos e cada um pode tratar a pessoa
+    por um nome diferente — decisao do usuario: "o jarvis e jarvis ele nao tem
+    charon" e "separados tambem".
+
+    Antes havia UM `user_name` por tenant: trocar o nome no Charon mudava o que o
+    Jarvis falava (e vice-versa). Foi o defeito relatado: "eu tinha salvo um nome
+    de usuario de yuri no charon que ja foi trocado para wilson e agora em jarvis
+    ele acabou recebendo que o usuario tem o nome de yuri".
+
+    `assistente=None` devolve o `user_name` compartilhado, que continua sendo a
+    coluna de referencia (compatibilidade com quem ja tinha o nome gravado).
     """
     fallback = _default_identity()
     if not tenant_id:
@@ -302,19 +317,42 @@ def get_identity(tenant_id: Optional[str]) -> dict:
     if is_master_key(tenant_id):
         _ensure_master_row(tenant_id)
 
+    # Coluna do nome do usuario conforme o assistente. Nome de coluna vem de um
+    # mapa FECHADO (nunca do valor recebido), para nao haver injecao de SQL.
+    coluna = _COLUNA_USER.get((assistente or "").strip().lower(), "user_name")
+
     try:
         from database.connection import get_conn
 
         conn = get_conn()
         try:
             row = conn.execute(
-                "SELECT assistant_name, user_name, voice FROM tenants WHERE id = ?",
+                f"SELECT assistant_name, user_name, voice, {coluna} AS user_do_assistente "
+                f"FROM tenants WHERE id = ?",
                 (tenant_id,),
             ).fetchone()
         finally:
             conn.close()
     except Exception:
-        return fallback
+        # Coluna ainda nao criada (banco antigo, migracao pendente): cai no
+        # caminho de sempre em vez de derrubar a leitura da identidade.
+        try:
+            from database.connection import get_conn
+
+            conn = get_conn()
+            try:
+                row = conn.execute(
+                    "SELECT assistant_name, user_name, voice FROM tenants WHERE id = ?",
+                    (tenant_id,),
+                ).fetchone()
+            finally:
+                conn.close()
+            if row:
+                d = dict(row)
+                d["user_do_assistente"] = None
+                row = d
+        except Exception:
+            return fallback
 
     if not row:
         return fallback
@@ -323,15 +361,29 @@ def get_identity(tenant_id: Optional[str]) -> dict:
         db_assistant = row["assistant_name"]
         db_user = row["user_name"]
         db_voice = row["voice"]
+        db_user_assistente = row["user_do_assistente"] if "user_do_assistente" in row.keys() else None
     except (KeyError, IndexError, TypeError):
         return fallback
+
+    # Nome do usuario: o do assistente manda; se ele nunca personalizou, usa o
+    # compartilhado (que e o que ja existia antes desta separacao).
+    usuario = (db_user_assistente or "").strip() or (db_user or "").strip()
 
     return {
         # None ou vazio = tenant nunca personalizou -> usa o padrao global
         "assistant_name": (db_assistant or "").strip() or fallback["assistant_name"],
-        "user_name": (db_user or "").strip(),
+        "user_name": usuario,
         "voice": (db_voice or "").strip() or fallback.get("voice", DEFAULT_VOICE),
     }
+
+
+# Mapa FECHADO assistente -> coluna do nome do usuario. O valor recebido da
+# requisicao nunca vira nome de coluna: so escolhe entre estas duas.
+_COLUNAS_USER_VALIDAS = ("charon_user_name", "jarvis_user_name")
+_COLUNA_USER = {
+    "charon": "charon_user_name",
+    "jarvis": "jarvis_user_name",
+}
 
 
 def set_identity(
@@ -339,6 +391,7 @@ def set_identity(
     assistant_name: str,
     user_name: str,
     voice: Optional[str] = None,
+    assistente: Optional[str] = None,
 ) -> bool:
     """
     Grava a identidade do tenant. Retorna True se gravou no banco.
@@ -348,6 +401,10 @@ def set_identity(
 
     `voice=None` preserva a voz ja gravada (permite salvar so o nome sem
     apagar a escolha de voz).
+
+    `assistente` ("charon" | "jarvis") grava o nome do usuario na coluna DAQUELE
+    assistente, para os dois serem independentes (ver `get_identity`). Sem ele, o
+    nome vai para o campo compartilhado, como antes.
     """
     if not tenant_id:
         return False
@@ -362,31 +419,29 @@ def set_identity(
     user = (user_name or "").strip()
     voz = (voice or "").strip()
 
+    # Coluna especifica do assistente, quando informado.
+    coluna = _COLUNA_USER.get((assistente or "").strip().lower())
+    extra_col = f", {coluna} = ?" if coluna in _COLUNAS_USER_VALIDAS else ""
+    extra_val = (user,) if coluna in _COLUNAS_USER_VALIDAS else ()
+
     try:
         from database.connection import get_conn
 
         conn = get_conn()
         try:
             if voz:
-                cur = conn.execute(
-                    """
-                    UPDATE tenants
-                       SET assistant_name = ?, user_name = ?, voice = ?,
-                           updated_at = datetime('now')
-                     WHERE id = ?
-                    """,
-                    (assistant, user, voz, tenant_id),
+                sql = (
+                    f"UPDATE tenants SET assistant_name = ?, user_name = ?, voice = ?"
+                    f"{extra_col}, updated_at = datetime('now') WHERE id = ?"
                 )
+                params = (assistant, user, voz, *extra_val, tenant_id)
             else:
-                cur = conn.execute(
-                    """
-                    UPDATE tenants
-                       SET assistant_name = ?, user_name = ?,
-                           updated_at = datetime('now')
-                     WHERE id = ?
-                    """,
-                    (assistant, user, tenant_id),
+                sql = (
+                    f"UPDATE tenants SET assistant_name = ?, user_name = ?"
+                    f"{extra_col}, updated_at = datetime('now') WHERE id = ?"
                 )
+                params = (assistant, user, *extra_val, tenant_id)
+            cur = conn.execute(sql, params)
             conn.commit()
             return cur.rowcount > 0
         finally:

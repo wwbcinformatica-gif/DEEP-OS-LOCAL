@@ -169,8 +169,8 @@ check("jarvis_workspace" in jarvis,
 # Discreto: o chip na barra foi REMOVIDO (ver secao 10) — quem cuida da criacao
 # de raiz agora e o "+" do cabecalho da arvore. Aqui so verificamos que a arvore
 # tem esse ponto unico.
-check('title="Nova raiz (workspace)"' in jarvis,
-      "a arvore tem o '+' de criar raiz (ponto unico)",
+check('title="Criar uma nova pasta (raiz) para organizar conversas"' in jarvis,
+      "a arvore tem o botao de criar raiz (ponto unico, rotulado)",
       "nao ha botao de criar raiz na arvore")
 # Agrupamento na lista
 check("conversations.filter(c => (c.workspace || WORKSPACE_PADRAO) === ws)" in jarvis,
@@ -382,9 +382,14 @@ check("O CHIP DE WORKSPACE FOI REMOVIDO" in jarvis,
 check("Workspace atual:" not in jarvis,
       "o seletor de workspace duplicado foi removido",
       "ainda existe o seletor de workspace na barra")
-check('title="Nova raiz (workspace)"' in jarvis,
-      "ha UM lugar para criar raiz (o + do cabecalho da arvore)",
+check('title="Criar uma nova pasta (raiz) para organizar conversas"' in jarvis,
+      "ha UM lugar para criar raiz (o botao do cabecalho da arvore)",
       "nao ha botao unico de criar raiz")
+# E os dois botoes de "+" precisam ser distinguiveis: um cria CONVERSA, outro
+# cria PASTA. O usuario viu os dois na tela e perguntou qual usar.
+check("+ pasta" in jarvis,
+      "o botao de pasta se distingue do de conversa",
+      "dois '+' iguais lado a lado: o usuario tem de adivinhar")
 
 # getWorkspaces nao pode forcar 'Geral' quando ha raizes em uso
 m_ws = re.search(r"export function getWorkspaces\(\): string\[\] \{(.*?)\n\}", storage, re.S)

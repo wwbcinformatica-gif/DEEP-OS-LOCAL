@@ -69,8 +69,34 @@ GEMINI_VOICES = {
 
 
 def _resolve_voice(voice: str) -> str:
-    """Resolve nome da voz (case-insensitive)."""
-    return GEMINI_VOICES.get(voice.lower(), voice)
+    """
+    Resolve o nome da voz (case-insensitive) e GARANTE que ele existe.
+
+    ⚠️ BUG QUE ISTO RESOLVE
+
+    Antes era so `GEMINI_VOICES.get(voice.lower(), voice)` — ou seja, um nome
+    desconhecido era repassado CRU para o Gemini. Medido:
+
+        _resolve_voice('Charon') -> 'Charon'    (certo)
+        _resolve_voice('Atena')  -> 'Atena'     (nome inventado, ia para a API)
+        _resolve_voice('aode')   -> 'aode'      (typo, ia para a API)
+
+    Nome invalido no `prebuilt_voice_config` faz a API recusar a sessao OU cair
+    na voz padrao dela — e o sintoma que o usuario viveu: "a voz escolhida esta
+    Charon, mas quem fala e Aoede". Sem validacao, ele nao tinha como saber que o
+    valor gravado estava errado.
+
+    Agora um nome fora da lista vira `Charon` (padrao) e fica registrado no log,
+    em vez de virar comportamento imprevisivel.
+    """
+    if not voice:
+        return "Charon"
+    resolvida = GEMINI_VOICES.get(str(voice).strip().lower())
+    if resolvida:
+        return resolvida
+    print(f"[VoiceWS] AVISO: voz desconhecida {voice!r} — usando 'Charon'. "
+          f"Validas: {', '.join(sorted(GEMINI_VOICES.values()))}")
+    return "Charon"
 
 
 def _get_gemini_key() -> str:
@@ -230,13 +256,28 @@ BASIC_TOOL_DECLARATIONS = [
     },
     {
         "name": "youtube_video",
-        "description": "Busca e abre videos do YouTube. Use quando o usuario quiser assistir, pesquisar ou ouvir musicas no YouTube.",
+        "description": (
+            "YouTube: toca, resume, informa ou lista em alta. "
+            "Use 'play' quando o usuario quiser OUVIR ou ASSISTIR algo — "
+            "'play' ja faz a busca e abre o primeiro video."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "query": {"type": "STRING", "description": "Busca no YouTube"},
-                "action": {"type": "STRING", "description": "search (padrao) ou open (abrir video especifico)"},
-                "video_id": {"type": "STRING", "description": "ID do video para open"}
+                "query": {"type": "STRING", "description": "O que tocar ou buscar (ex: 'James Blunt')"},
+                # A LISTA AQUI TEM DE BATER COM `_ACTION_MAP` em
+                # actions/youtube_video.py. Ela estava ERRADA: dizia
+                # "search (padrao) ou open", mas a implementacao so aceita
+                # play/summarize/get_info/trending. O modelo obedecia a
+                # declaracao, mandava action='search' e recebia
+                # "Unknown YouTube action: 'search'" — o usuario viu exatamente
+                # isso no painel central. Declaracao que mente e pior que
+                # declaracao ausente: o modelo nao tem como adivinhar a verdade.
+                "action": {
+                    "type": "STRING",
+                    "description": "play (toca, ja busca) | summarize (resumo) | get_info (dados do video) | trending (em alta)",
+                },
+                "video_id": {"type": "STRING", "description": "ID do video (opcional, para get_info/summarize)"},
             },
             "required": ["query"]
         }
@@ -521,13 +562,28 @@ MEDIUM_TOOL_DECLARATIONS = [
     },
     {
         "name": "youtube_video",
-        "description": "Busca e abre videos do YouTube. Use quando o usuario quiser assistir, pesquisar ou ouvir musicas no YouTube.",
+        "description": (
+            "YouTube: toca, resume, informa ou lista em alta. "
+            "Use 'play' quando o usuario quiser OUVIR ou ASSISTIR algo — "
+            "'play' ja faz a busca e abre o primeiro video."
+        ),
         "parameters": {
             "type": "OBJECT",
             "properties": {
-                "query": {"type": "STRING", "description": "Busca no YouTube"},
-                "action": {"type": "STRING", "description": "search (padrao) ou open (abrir video especifico)"},
-                "video_id": {"type": "STRING", "description": "ID do video para open"}
+                "query": {"type": "STRING", "description": "O que tocar ou buscar (ex: 'James Blunt')"},
+                # A LISTA AQUI TEM DE BATER COM `_ACTION_MAP` em
+                # actions/youtube_video.py. Ela estava ERRADA: dizia
+                # "search (padrao) ou open", mas a implementacao so aceita
+                # play/summarize/get_info/trending. O modelo obedecia a
+                # declaracao, mandava action='search' e recebia
+                # "Unknown YouTube action: 'search'" — o usuario viu exatamente
+                # isso no painel central. Declaracao que mente e pior que
+                # declaracao ausente: o modelo nao tem como adivinhar a verdade.
+                "action": {
+                    "type": "STRING",
+                    "description": "play (toca, ja busca) | summarize (resumo) | get_info (dados do video) | trending (em alta)",
+                },
+                "video_id": {"type": "STRING", "description": "ID do video (opcional, para get_info/summarize)"},
             },
             "required": ["query"]
         }
@@ -881,16 +937,135 @@ _PROJECT_CONTEXT_CACHE: dict = {"mtime": 0.0, "text": ""}
 
 
 def _load_project_context() -> str:
-    """Carrega o CHARON_CONTEXT.md (conhecimento do projeto + desenvolvedor)."""
+    """
+    Carrega o CHARON_CONTEXT.md (conhecimento do projeto + desenvolvedor) e
+    CORRIGE a ambiguidade de ambiente.
+
+    ⚠️ BUG QUE ISTO RESOLVE (relatado pelo usuario, e ele estava certo)
+
+    O `CHARON_CONTEXT.md` descreve OS DOIS modos de execucao — "Local (com
+    desktop)" e "VPS/Servidor (Headless)" — e uma secao inteira de
+    "Ferramentas que NAO funcionam no VPS". O arquivo entrava no prompt **sem
+    dizer qual dos dois estava ativo**.
+
+    Resultado: o modelo tinha de ESCOLHER. E escolheu errado — respondendo
+    "estou em um ambiente de servidor (headless), sem interface grafica, isso
+    impede que eu utilize ferramentas de controle de navegador" **rodando no PC
+    do usuario, que tem desktop**. Ele tinha acabado de ler as duas secoes e
+    ficou com a restritiva, ainda mais porque as ferramentas de tela estavam
+    indisponiveis naquele momento por outro bug (o `API_BASE` fixo) — o que
+    "confirmava" a teoria errada dele.
+
+    Foi por causa disso que o usuario criou o projeto gemeo local: o Charon
+    dizia que nao podia fazer o que o Jarvis fazia na mesma maquina.
+
+    Correcao: aqui trocamos as DUAS secoes do arquivo por UMA declaracao
+    inequivoca, montada a partir do `is_headless()` — a MESMA funcao que decide
+    quais ferramentas sao oferecidas. Assim a lista do prompt e a lista real de
+    ferramentas nunca discordam (era essa discordancia que o modelo tentava
+    explicar inventando um "modo servidor").
+
+    O arquivo original fica intacto no disco: a troca e so no texto enviado.
+    """
     try:
         ctx_path = Path(__file__).resolve().parent.parent.parent / "CHARON_CONTEXT.md"
         mtime = ctx_path.stat().st_mtime if ctx_path.exists() else 0.0
         if mtime != _PROJECT_CONTEXT_CACHE["mtime"]:
             _PROJECT_CONTEXT_CACHE["mtime"] = mtime
             _PROJECT_CONTEXT_CACHE["text"] = ctx_path.read_text(encoding="utf-8")
-        return _PROJECT_CONTEXT_CACHE["text"]
+        bruto = _PROJECT_CONTEXT_CACHE["text"]
     except Exception:
         return ""
+    return _substituir_secao_ambiente(bruto)
+
+
+# Secoes do CHARON_CONTEXT.md que falam de ambiente. Elas sao REMOVIDAS do texto
+# enviado ao modelo e trocadas por uma declaracao unica (ver _load_project_context).
+#
+# ATENCAO ao manter esta lista: o match e EXATO (a linha inteira, sem espacos nas
+# pontas) e o texto tem de ser copiado do ARQUIVO, nao do que aparece na tela.
+# Eu escrevi este cabecalho com ":" no fim porque era assim que ele aparecia
+# renderizado no editor — o arquivo nao tem ":". Resultado: a secao nao era
+# removida e continuava no prompt, dizendo ao modelo que ele estava num VPS.
+# Foi a verificacao (contar quantas vezes "VPS" sobra) que pegou.
+_SECOES_DE_AMBIENTE = (
+    "## Modo de Execucao",
+    "## Ferramentas Disponiveis no VPS (headless)",
+    "## Ferramentas que NAO funcionam no VPS",
+)
+
+
+def _substituir_secao_ambiente(texto: str) -> str:
+    """
+    Troca as secoes de ambiente por UMA declaracao do que esta ativo AGORA.
+
+    Remove de "## Modo de Execucao" ate a proxima secao "## " — o que engole as
+    tres secoes seguidas, porque sao contiguas no arquivo — e poe no lugar o
+    bloco com a verdade do runtime.
+
+    `inserido` existe porque a PRIMEIRA versao deste codigo tentou evitar a
+    duplicata olhando as ultimas linhas da saida, e o bloco entrou DUAS VEZES
+    (verificado rodando). Uma flag simples resolve, e o teste cobre isso.
+    """
+    linhas = texto.splitlines()
+    saida: list[str] = []
+    inserido = False
+    i = 0
+    while i < len(linhas):
+        if linhas[i].strip() in _SECOES_DE_AMBIENTE:
+            # Pula esta secao inteira (ate a proxima linha que comeca com "## ").
+            i += 1
+            while i < len(linhas) and not linhas[i].startswith("## "):
+                i += 1
+            if not inserido:
+                saida.append(_bloco_ambiente_ativo())
+                inserido = True
+            continue
+        saida.append(linhas[i])
+        i += 1
+
+    # Regras que so fazem sentido no modo headless viram regras condicionais:
+    # a regra 5 do arquivo diz "se pedirem algo que nao pode fazer NO VPS" — num
+    # PC com desktop isso e falso e o modelo pode se apoiar nela para recusar
+    # tarefas que aqui funcionam.
+    if not is_headless():
+        saida = [
+            ("5. Se uma ferramenta falhar, diga o erro REAL que ela retornou. "
+             "NUNCA culpe o ambiente: este ambiente tem tela e as ferramentas de "
+             "desktop estao disponiveis.")
+            if l.strip().startswith("5. Se pedirem algo que nao pode fazer no VPS")
+            else l
+            for l in saida
+        ]
+
+    return "\n".join(saida)
+
+
+def _bloco_ambiente_ativo() -> str:
+    """
+    Declaracao INEQUIVOCA do ambiente onde esta rodando, para o modelo.
+
+    Inclui a proibicao de culpar o ambiente: sem ela, um erro real de ferramenta
+    vira "estou num servidor sem tela" — que foi exatamente o que aconteceu.
+    """
+    if is_headless():
+        return (
+            "## AMBIENTE ATIVO AGORA (nao ha outro modo — nao especule)\n"
+            "- Servidor Linux SEM interface grafica (headless).\n"
+            "- Ferramentas de desktop (abrir app, navegador, controlar tela) NAO estao "
+            "disponiveis e nao aparecem na sua lista de ferramentas.\n"
+            "- Entregue LISTAS e RESUMOS como documento (save_document) com link de "
+            "download, em vez de tentar abrir algo na tela.\n"
+        )
+    return (
+        "## AMBIENTE ATIVO AGORA (nao ha outro modo — nao especule)\n"
+        "- Computador do usuario COM interface grafica (desktop).\n"
+        "- TODAS as ferramentas funcionam, inclusive abrir aplicativos, navegador, "
+        "tocar YouTube e controlar a tela. Se uma ferramenta esta na sua lista, "
+        "presuma que ela funciona.\n"
+        "- NUNCA diga que esta em um servidor, nem que nao pode abrir aplicativos "
+        "ou navegador: este ambiente tem tela.\n"
+    )
 
 
 _identity_cache = {}
@@ -1915,6 +2090,18 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
         `assistant` (esse e o vocabulario do OpenAI). Usar o papel errado faz a
         API rejeitar o turno.
 
+        SUGESTAO DO USUARIO (aplicada aqui): "a nao ser que quando clicar no
+        historico ele ja cole novamente no chat do charon para ele ganhar o
+        contexto novamente".
+
+        Ou seja: alem de enviar os turnos como contexto (que o modelo deveria
+        absorver sozinho), mandamos tambem um RESUMO COLADO como um turno de
+        usuario explicito. Motivo: "absorver turnos em silencio" e um
+        comportamento que o modelo pode ignorar — e quando ele ignora, ele
+        responde com o contexto do PROJETO (que vem do system prompt) e parece
+        que esta lembrando de algo, quando nao esta. Uma mensagem explicita diz
+        "isto e o que ja conversamos" e nao da margem a interpretacao.
+
         Devolve quantos turnos foram enviados.
         """
         turnos = _montar_turnos_historico(self._history)
@@ -1924,12 +2111,51 @@ hr {{ border: none; border-top: 1px solid #ddd; margin: 20px 0; }}
             await self.session.send_client_content(turns=turnos, turn_complete=False)
             print(f"[VoiceWS] Historico enviado: {len(turnos)} turnos "
                   f"({sum(len(p['text']) for t in turnos for p in t['parts'])} chars)")
-            return len(turnos)
         except Exception as e:
             # Nao derruba a sessao por causa do historico: sem contexto o Charon
             # ainda funciona, so nao lembra da conversa anterior.
             print(f"[VoiceWS] Falha ao enviar historico (seguindo sem ele): {e}")
             return 0
+
+        # Reforco explicito (ver docstring). Falha aqui nao invalida o envio
+        # acima: o contexto ja foi entregue.
+        resumo = self._resumo_do_historico(turnos)
+        if resumo:
+            try:
+                await self.session.send_client_content(
+                    turns={"parts": [{"text": (
+                        "COLE isto como o que nos ja conversamos nesta sessao. "
+                        "Trate como contexto ja estabelecido e NAO leia em voz alta, "
+                        "NAO resuma e NAO comente este aviso:\n\n" + resumo
+                    )}]},
+                    turn_complete=False,
+                )
+                print(f"[VoiceWS] Historico reforcado como mensagem explicita ({len(resumo)} chars)")
+            except Exception as e:
+                print(f"[VoiceWS] Falha ao reforcar o historico (ignorado): {e}")
+        return len(turnos)
+
+    @staticmethod
+    def _resumo_do_historico(turnos: list) -> str:
+        """
+        Junta os turnos num texto unico, curto, para colar como mensagem.
+
+        Rotula QUEM falou com os nomes reais (da identidade): sem isso o resumo
+        vira "Voce: ... / Voce: ..." e o modelo nao sabe qual fala e dele e qual
+        e do usuario — pior que nao mandar nada.
+        """
+        ident = _load_identity() or {}
+        nome_usuario = (ident.get("user_name") or "").strip() or "Usuario"
+        nome_assistente = (ident.get("assistant_name") or "").strip() or "Assistente"
+
+        linhas = []
+        for t in turnos:
+            quem = nome_usuario if t.get("role") == "user" else nome_assistente
+            texto = " ".join(p.get("text", "") for p in t.get("parts", []))
+            texto = " ".join(texto.split())
+            if texto:
+                linhas.append(f"{quem}: {texto}")
+        return "\n".join(linhas)
 
     async def _send_startup_briefing(self):
         await asyncio.sleep(1)
@@ -2622,7 +2848,13 @@ async def voice_websocket(ws: WebSocket):
                     historico = data.get("history") or []
                     if historico:
                         print(f"[VoiceWS] Historico recebido: {len(historico)} falas")
-                    inst_temp = data.get("temperature", 0.7)
+                    # NOTA: existia aqui `inst_temp = data.get("temperature", 0.7)`,
+                    # que NUNCA era usada (variavel morta: nao entra no
+                    # LiveConnectConfig). Removida para nao sugerir que o
+                    # temperature da instancia vale no Charon — ele NAO vale.
+                    #
+                    # O Charon roda no Gemini Live, que so tem o modelo de audio
+                    # nativo. Decisao do usuario: instancia e coisa do Jarvis.
 
                     # Registra o fuso do usuario no contexto. Sem isto, a action
                     # `reminder` calculava "agora" com o relogio do servidor

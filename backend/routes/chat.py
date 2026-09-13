@@ -621,29 +621,78 @@ def _load_config_system_prompt() -> str:
 _identity_cache = {}
 _identity_cache_time = 0
 
-def _load_identity() -> dict:
-    """Carrega identity do config.yaml com cache."""
+def _load_identity(tenant_id: str | None = None, assistente: str | None = None) -> dict:
+    """
+    Carrega a identidade (nome do assistente, nome do usuario, voz).
+
+    ⚠️ BUG DO VAZAMENTO DE NOME ENTRE OS DOIS ASSISTENTES
+
+    Antes esta funcao lia SEMPRE o `config.yaml` da RAIZ — um arquivo GLOBAL.
+    O Charon, na mesma maquina, le a identidade do TENANT (banco, via
+    `core.tenant_identity`). Resultado: os dois discordavam.
+
+    O usuario viu isso na pratica: trocou o nome do usuario no Charon (que grava
+    no tenant) e o JARVIS continuou chamando a pessoa pelo nome antigo, porque
+    seguia lendo o arquivo global — que ninguem mais atualizava.
+
+    Num SaaS isso e pior: `config.yaml` e um arquivo so para todos os
+    assinantes. Sem tenant, a identidade de um cliente apareceria no chat do
+    outro.
+
+    Ordem agora (a mesma que a rota `/api/config/identity` ja usava):
+      1. tenant (com JWT)  -> identidade daquele assinante;
+      2. config.yaml       -> identidade global (app desktop, sem login).
+    """
     global _identity_cache, _identity_cache_time
     import time
     now = time.time()
-    if _identity_cache and (now - _identity_cache_time) < 5:
-        return _identity_cache
+
+    # Sem tenant explicito, tenta o ContextVar central — o mesmo que o Charon usa
+    # e que a action de lembrete le. Na VPS o middleware de tenant ja preenche
+    # esse valor por requisicao, entao o Jarvis passa a enxergar a identidade do
+    # assinante sem precisar de mudanca em cada chamada.
+    if not tenant_id:
+        try:
+            from core.tenant_identity import get_current_tenant
+            tenant_id = get_current_tenant()
+        except Exception:
+            tenant_id = None
+
+    chave = f"{tenant_id or '__global__'}::{assistente or '-'}"
+    # O cache e POR CHAVE (tenant + assistente): um cache unico faria o primeiro
+    # assinante a chamar "emprestar" a identidade para os outros, e o nome de um
+    # assistente aparecer no outro.
+    if _identity_cache.get(chave) and (now - _identity_cache_time) < 5:
+        return _identity_cache[chave]
+
+    resultado: dict = {}
     try:
-        import yaml
-        from pathlib import Path
-        config_path = Path(__file__).resolve().parent.parent.parent / "config.yaml"
-        with open(config_path, encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        result = data.get("identity", {})
-        _identity_cache = result
-        _identity_cache_time = now
-        return result
-    except Exception:
-        return {}
+        from core.tenant_identity import get_identity as _get_tenant_identity
+        resultado = _get_tenant_identity(tenant_id, assistente) or {}
+    except Exception as e:
+        print(f"[Chat] Nao consegui ler a identidade do tenant ({tenant_id!r}): {e}")
+
+    # Sem tenant (ou tenant sem dados), cai no arquivo global.
+    if not resultado:
+        try:
+            import yaml
+            from pathlib import Path
+            config_path = Path(__file__).resolve().parent.parent.parent / "config.yaml"
+            with open(config_path, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            resultado = data.get("identity", {}) or {}
+        except Exception:
+            resultado = {}
+
+    _identity_cache[chave] = resultado
+    _identity_cache_time = now
+    return resultado
 
 
-def build_system_prompt(msg: Message) -> str:
-    identity = _load_identity()
+def build_system_prompt(msg: Message, tenant_id: str | None = None) -> str:
+    # `msg.assistente` escolhe a coluna do NOME DO USUARIO: o Jarvis tem a dele,
+    # o Charon tem a dele (decisao do usuario). O nome do ASSISTENTE e o mesmo.
+    identity = _load_identity(tenant_id, assistente=getattr(msg, "assistente", "") or None)
     assistant_name = identity.get("assistant_name", "DEEP-OS") or "DEEP-OS"
     user_name = identity.get("user_name", "") or "usuario"
     
