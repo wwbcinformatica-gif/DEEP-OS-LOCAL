@@ -77,7 +77,37 @@ primeiro gesto) e cumprimentava. Agora:
 **Configurações → Identidade → NOME DO ASSISTENTE**. Vale para o Charon **e**
 para o Jarvis (cada um lê a identidade do tenant).
 
-### 4. Correções menores
+### 4. Ferramentas por ambiente — o Jarvis não filtrava o que a VPS não tem
+
+O usuário perguntou se o **mesmo** `C:\DEEP-OS` poderia ter as duas funções
+("no vps só o que funciona no vps, no local tudo"). A resposta é que **já podia**:
+`is_headless()` responde "tem tela aqui?" — sempre `False` no Windows, `True` no
+Linux sem `DISPLAY` (a VPS). Ele não sabia disso, e foi por isso que criou o
+projeto gêmeo.
+
+**O defeito real:** o filtro existia em **um lugar só** (`_HEADLESS_EXCLUDED`,
+no Charon/voz). O **Jarvis (texto) não filtrava nada** — na VPS ele oferecia
+`open_app`, `desktop_control`, `browser_control`… e elas **falhavam na execução**
+(`pyautogui` levanta `KeyError: 'DISPLAY'`, não `ImportError`).
+
+**Opção A (escolhida pelo usuário):** fonte única em `tools/function_defs.py`
+(`FERRAMENTAS_COM_GUI` + `filtrar_tools_sem_gui()`), usada pelo Charon **e** pelo
+Jarvis, nos **dois** caminhos (streaming e tarefas).
+
+| | PC (com desktop) | VPS (headless) |
+|---|---|---|
+| **Jarvis (texto)** | 58 ferramentas | 46 |
+| **Charon (voz)** | 26 ferramentas | 18 |
+
+Saem na VPS: `open_app`, `close_app`, `computer_settings`, `computer_control`,
+`desktop_control`, `screen_process`, `browser_control`, `game_updater`,
+`send_message`, `upload_video`, `media_play`, `explorer`.
+
+**Bônus achado no caminho:** o `run_all.py` tinha **lista fixa** de testes — um
+arquivo novo nunca rodava na suíte (aconteceu com o teste que eu acabei de criar).
+Agora o runner avisa quais `test_*.py` ficaram de fora.
+
+### 5. Correções menores
 
 - `CharonPage.tsx` tinha um `interface TranscriptEntry` **local** sombreando o
   tipo do `chatStorage` → erro `TS2440`; removido (**um lugar só**).
@@ -86,6 +116,9 @@ para o Jarvis (cada um lê a identidade do tenant).
   entrega organizada.
 - `STATUS.md` tinha **um byte inválido** (0x97) que impedia até de abrir o
   arquivo; corrigido (backup em `backup-docs/`).
+- **Botão "⚡ Charon ouvindo"**: pergunta do usuário que virou bug real — religar
+  mandava `history: []` e o Charon voltava **sem o contexto** da conversa. Agora
+  reconecta retomando o histórico. O histórico *gravado* nunca se perdia ali.
 
 ---
 

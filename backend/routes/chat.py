@@ -34,15 +34,33 @@ from core.security import validate_message_length
 from database.connection import get_conn
 from memory.reflection import save_llm_reflection
 from tools.executor import execute_tool
-from tools.function_defs import TOOLS
+from tools.function_defs import TOOLS, filtrar_tools_sem_gui
 
 limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter()
 
+# ── Ferramentas de tela: o MESMO codigo serve nos dois ambientes ───────────────
+#
+# PEDIDO DO USUARIO: "no vps funcionar somente as ferramentas que funciona no vps
+# e no local funcionar todas as ferramentas".
+#
+# Na VPS (Linux sem tela) ferramentas como `open_app`, `desktop_control` e
+# `browser_control` eram OFERECIDAS ao modelo e FALHAVAM na execucao — o usuario
+# via "a ferramenta nao funciona" sem saber que era o ambiente, nao o codigo.
+# O Charon (voz) ja filtrava; o Jarvis nao. Agora os dois usam a MESMA lista,
+# `FERRAMENTAS_COM_GUI`, em `tools/function_defs.py`.
+#
+# No Windows `is_headless()` e sempre False, entao aqui nada muda: o LOCAL
+# continua com todas as ferramentas.
+TOOLS_DO_AMBIENTE, _REMOVIDAS_POR_FALTA_DE_TELA = filtrar_tools_sem_gui(TOOLS)
+if _REMOVIDAS_POR_FALTA_DE_TELA:
+    print(f"[Chat] Modo headless: {len(TOOLS)} -> {len(TOOLS_DO_AMBIENTE)} tools "
+          f"(sem tela, removidas: {', '.join(_REMOVIDAS_POR_FALTA_DE_TELA)})")
+
 # ── Tools filtradas para modelos locais (reduzir tokens) ────────────────────────
 # Modelos locais tem contexto limitado, entao enviamos apenas as tools essenciais
-LOCAL_TOOLS = [t for t in TOOLS if t["function"]["name"] in [
+LOCAL_TOOLS = [t for t in TOOLS_DO_AMBIENTE if t["function"]["name"] in [
     # Arquivos e codigo
     "read", "write", "bash", "explorer", "search", "glob",
     "create_directory", "delete", "rename", "file_edit",
@@ -1134,11 +1152,13 @@ async def handle_task_stream(msg: Message) -> AsyncGenerator[dict, None]:
         # ═══════════════════════════════════════════════════════════════
 
         async def call_model_stream(messages_inner: list) -> AsyncGenerator[dict, None]:
-            # Modelos locais usam LOCAL_TOOLS (reduzido) para caber no contexto
+            # Modelos locais usam LOCAL_TOOLS (reduzido) para caber no contexto.
+            # TOOLS_DO_AMBIENTE = TOOLS sem as ferramentas de tela quando nao ha
+            # display (VPS). No PC com desktop e identico a TOOLS.
             if msg.provider in ("ollama", "llamacpp"):
                 effective_tools = [] if is_greeting or not supports_tools(msg.provider, msg.model) else LOCAL_TOOLS
             else:
-                effective_tools = [] if is_greeting or not supports_tools(msg.provider, msg.model) else TOOLS
+                effective_tools = [] if is_greeting or not supports_tools(msg.provider, msg.model) else TOOLS_DO_AMBIENTE
             tool_names = [t["function"]["name"] for t in effective_tools] if effective_tools else []
             print(f"[CHAT] provider={msg.provider} model={msg.model} tools={len(effective_tools)} tool_names={tool_names[:10]}... is_greeting={is_greeting}")
             async for chunk in stream_chat_with_tools(
@@ -2165,11 +2185,12 @@ async def handle_task(msg: Message):
         ]
 
         for step in range(max_steps):
-            # Modelos locais usam LOCAL_TOOLS (reduzido) para caber no contexto
+            # Modelos locais usam LOCAL_TOOLS (reduzido) para caber no contexto.
+            # TOOLS_DO_AMBIENTE: sem as ferramentas de tela na VPS (ver topo do arquivo).
             if msg.provider in ("ollama", "llamacpp"):
                 step_tools = [] if is_greeting or not supports_tools(msg.provider, msg.model) else LOCAL_TOOLS
             else:
-                step_tools = [] if is_greeting or not supports_tools(msg.provider, msg.model) else TOOLS
+                step_tools = [] if is_greeting or not supports_tools(msg.provider, msg.model) else TOOLS_DO_AMBIENTE
             result = await complete_chat_with_tools(
                 msg.provider, msg.model, messages, step_tools, tool_temp, api_key=msg.api_key
             )

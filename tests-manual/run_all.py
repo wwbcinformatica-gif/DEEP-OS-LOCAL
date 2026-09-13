@@ -80,9 +80,33 @@ TESTES = [
      "TODOS OS TESTES PASSARAM"),
     ("test_historico_conversa.py", "Historico: mensagens salvas, restauradas e exportaveis",
      "TODOS OS TESTES PASSARAM"),
+    ("test_tools_headless.py", "Ferramentas por ambiente: VPS (sem tela) x PC (com desktop)",
+     "TODOS OS TESTES PASSARAM"),
     ("audit_headless_tools.py", "Auditoria: quais tools carregam (headless)",
      "NAO importam/carregam: 0"),
 ]
+
+
+def testes_esquecidos() -> list[str]:
+    """
+    Arquivos de teste que existem na pasta mas NAO estao na lista TESTES.
+
+    POR QUE ISTO EXISTE
+    A lista acima e fixa. Consequencia: um arquivo novo e escrito, passa quando
+    rodado na mao e **nunca mais roda** no `run_all.py` — vira um teste morto que
+    da a impressao de estar protegendo o codigo. Isso aconteceu de verdade nesta
+    sessao: criei `test_tools_headless.py`, rodei sozinho (passou) e a suite
+    continuou dizendo "20 testes", sem ele.
+
+    E a mesma classe de defeito que ja custou tempo neste projeto: uma regra que
+    depende de alguem lembrar. Aqui a ferramenta avisa sozinha.
+    """
+    na_lista = {nome for nome, _, _ in TESTES}
+    return sorted(
+        p.name
+        for p in AQUI.glob("test_*.py")
+        if p.name not in na_lista and p.name != Path(__file__).name
+    )
 
 
 def main() -> int:
@@ -101,6 +125,17 @@ def main() -> int:
         print("       Se faltar dependencia, rode com o Python do venv do backend.")
     print(f"Python: {VENV_PY}")
     print("=" * 72)
+
+    # Aviso (nao falha) para teste que ficou de fora da lista.
+    esquecidos = testes_esquecidos()
+    if esquecidos and not filtro:
+        print("\n" + "!" * 72)
+        print("ATENCAO: existem testes na pasta que NAO estao na lista TESTES e")
+        print("portanto NAO rodaram agora (teste que nao roda nao protege nada):")
+        for nome in esquecidos:
+            print(f"   - {nome}")
+        print("Acrescente-os em TESTES neste arquivo.")
+        print("!" * 72)
 
     resultados = []
     for arquivo, descricao, marcador in alvos:

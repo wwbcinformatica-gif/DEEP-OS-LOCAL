@@ -7,6 +7,77 @@ Can be filtered by toolset using ``get_tools_by_toolset()``.
 
 from tools.toolsets import filter_function_defs, resolve_multiple_toolsets
 
+# ── FERRAMENTAS QUE PRECISAM DE TELA (interface grafica) ─────────────────────
+#
+# FONTE UNICA. Antes esta lista existia em DOIS lugares com conteudos diferentes:
+#   - `routes/voice_ws.py` (`_HEADLESS_EXCLUDED`) filtrava as tools do CHARON;
+#   - o JARVIS (texto) NAO filtrava nada.
+#
+# Consequencia real: na VPS (Linux sem tela) o Charon deixava de oferecer essas
+# ferramentas, mas o Jarvis continuava oferecendo `open_app`, `desktop_control`,
+# `browser_control`... e elas FALHAVAM ao ser executadas, porque nao existe
+# display. O usuario via "a ferramenta nao funciona" sem entender que era o
+# ambiente.
+#
+# PEDIDO DO USUARIO: "no vps funcionar somente as ferramentas que funciona no
+# vps e no local funcionar todas as ferramentas".
+#
+# Como funciona a deteccao: `is_headless()`. No Windows responde sempre False
+# (tem desktop); no Linux responde True quando nao ha `DISPLAY` nem
+# `WAYLAND_DISPLAY` — exatamente o caso da VPS.
+#
+# ATENCAO ao manter esta lista: um nome errado aqui faz a ferramenta sumir no
+# PC (onde ela funcionaria). Teste: `tests-manual/test_tools_headless.py`.
+FERRAMENTAS_COM_GUI: frozenset[str] = frozenset({
+    "open_app",          # abre aplicativos do desktop
+    "close_app",         # fecha aplicativos
+    "computer_settings", # brilho, volume, papel de parede, wmctrl
+    "computer_control",  # mouse e teclado (pyautogui)
+    "desktop_control",   # janelas e area de trabalho
+    "screen_process",    # captura de tela
+    "browser_control",   # navegador com remote debugging
+    "game_updater",      # janelas de instalador do Steam
+    "send_message",      # WhatsApp Web pelo navegador
+    "upload_video",      # upload pelo navegador
+    "media_play",        # player local
+    "explorer",          # abre a pasta no gerenciador de arquivos do sistema
+})
+
+
+def filtrar_tools_sem_gui(tools: list, headless: bool | None = None) -> tuple[list, list]:
+    """
+    Remove as ferramentas de interface grafica quando nao ha tela.
+
+    Existe para que o MESMO codigo sirva nos dois ambientes (regra do projeto):
+    na VPS sobram as ferramentas que realmente funcionam la; no PC com desktop
+    ficam todas.
+
+    Aceita tanto as declaracoes do Jarvis (`{"type": "function", "function":
+    {"name": ...}}`) quanto as do Charon (`{"name": ...}`) — as duas formas
+    circulam no projeto.
+
+    `headless` permite FORCAR o resultado. Serve para o teste: no Windows
+    `is_headless()` e sempre False, entao sem este parametro nao haveria como
+    testar no PC o comportamento que roda na VPS — e o caminho que so executa em
+    producao e justamente o que costuma estar errado.
+
+    Devolve `(mantidas, removidas)` para quem quiser registrar o que saiu.
+    """
+    if headless is None:
+        from config import is_headless
+
+        headless = is_headless()
+
+    if not headless:
+        return list(tools), []
+
+    def nome(t) -> str:
+        return (t.get("function") or {}).get("name") or t.get("name") or ""
+
+    mantidas = [t for t in tools if nome(t) not in FERRAMENTAS_COM_GUI]
+    removidas = [nome(t) for t in tools if nome(t) in FERRAMENTAS_COM_GUI]
+    return mantidas, removidas
+
 TOOLS = [
     {
         "type": "function",

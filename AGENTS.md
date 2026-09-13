@@ -104,7 +104,7 @@ O passo 2 é o que torna a cópia segura: ele acusa qualquer arquivo que tenha
 
 ### DEPOIS DE ALTERAR, SEMPRE
 
-1. Rode a suíte nos **dois**: `python tests-manual/run_all.py` (20 arquivos)
+1. Rode a suíte nos **dois**: `python tests-manual/run_all.py` (21 arquivos)
 2. **Commit + push** no git dos **dois** (cada um no seu remoto e na sua branch)
 3. Sua mensagem final deve dizer **explicitamente** que o gêmeo foi sincronizado
    — ou **por que** não foi

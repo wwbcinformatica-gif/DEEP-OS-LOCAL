@@ -70,7 +70,7 @@ O venv fica em **pastas diferentes** — erro que já cometi:
 
 ```powershell
 cd C:\DEEP-OS
-.\venv\Scripts\python.exe tests-manual\run_all.py     # 20 arquivos, todos devem passar
+.\venv\Scripts\python.exe tests-manual\run_all.py     # 21 arquivos, todos devem passar
 ```
 
 ---
@@ -191,6 +191,52 @@ Teste: `tests-manual/test_charon_historico.py`, seção 7.
 Havia um `interface TranscriptEntry` **local** (mesmos 3 campos) sombreando o
 tipo importado do `chatStorage` → erro `TS2440`. Removido: **um lugar só**.
 (É a armadilha nº 0 deste documento acontecendo de novo.)
+
+### 5.4 Ferramentas por ambiente — o Jarvis não filtrava o que a VPS não tem
+
+**Pedido:** *"este projeto `C:\DEEP-OS` sendo executado pelo arquivo
+`start-saas.bat` poderia ter as duas funções: no vps funcionar somente as
+ferramentas que funciona no vps e no local funcionar todas as ferramentas"*.
+
+**O que já existia (e o usuário não sabia — foi por isso que ele criou o
+gêmeo):** `is_headless()` responde "tem tela aqui?" — no Windows é sempre
+`False`; no Linux é `True` quando não há `DISPLAY`/`WAYLAND_DISPLAY` (a VPS).
+**O mesmo código já se comportava diferente por ambiente.**
+
+**O defeito:** o filtro existia em **UM lugar só** — `_HEADLESS_EXCLUDED` em
+`routes/voice_ws.py`, que vale para o **Charon (voz)**. O **Jarvis (texto) não
+filtrava nada**. Na VPS ele oferecia `open_app`, `desktop_control`,
+`browser_control`… e elas **falhavam na execução**: `pyautogui` levanta
+`KeyError: 'DISPLAY'` (não `ImportError`) e `mss` não tem tela para capturar.
+
+**Correção escolhida (Opção A):**
+
+- `tools/function_defs.py` passou a ter a **fonte única**:
+  `FERRAMENTAS_COM_GUI` (12 nomes) + `filtrar_tools_sem_gui(tools, headless=None)`;
+- o Charon agora faz `_HEADLESS_EXCLUDED = FERRAMENTAS_COM_GUI` (a lista **é** a
+  única, não uma cópia — que divergiria);
+- `routes/chat.py` monta `TOOLS_DO_AMBIENTE` e usa nos **dois** caminhos
+  (`call_model_stream` e o loop de tarefas); `LOCAL_TOOLS` sai dele também.
+
+**Números medidos:** Jarvis **58** tools no PC → **46** na VPS.
+Charon **26** tools no PC → **18** na VPS. As 12 que saem: `open_app`,
+`close_app`, `computer_settings`, `computer_control`, `desktop_control`,
+`screen_process`, `browser_control`, `game_updater`, `send_message`,
+`upload_video`, `media_play`, `explorer`.
+
+**O parâmetro `headless` existe por um motivo específico:** no Windows
+`is_headless()` é sempre `False`, então **sem ele não haveria como testar no PC
+o caminho que só roda na VPS** — e caminho que só roda em produção é justamente
+o que costuma estar errado. Com ele, o teste força os dois cenários.
+
+Teste: `tests-manual/test_tools_headless.py` (seis blocos, incluindo "nenhum
+caminho ficou usando a lista crua" — a armadilha nº 4).
+
+**Armadilha nova encontrada no caminho:** o `run_all.py` tinha **lista fixa** de
+testes. Eu criei `test_tools_headless.py`, rodei sozinho (passou) e a suíte
+continuou dizendo "20 testes", **sem ele**. Agora o runner avisa sozinho quais
+arquivos `test_*.py` existem na pasta e **não** estão na lista. Teste que não
+roda não protege nada.
 
 ---
 
@@ -363,6 +409,13 @@ DEEP-OS usa como padrão e não tem a cota apertada do Gemini grátis.
     próximo** — e um turno vazio passaria por saudável, escondendo a falha. Por
     isso `_iniciar_turno()` é chamado também quando o usuário começa a falar
     (`send_audio` com silêncio > 0,5 s e `input_transcription`).
+14. **Teste que não está no `run_all.py` não existe.** A lista de testes é fixa:
+    um arquivo novo passa quando rodado na mão e nunca mais roda na suíte (já
+    aconteceu — ver 5.4). O runner agora avisa quais `test_*.py` ficaram de fora.
+15. **Caminho que só executa em produção é onde o bug se esconde.** O filtro
+    headless nunca rodava no PC (no Windows `is_headless()` é sempre `False`).
+    Por isso `filtrar_tools_sem_gui()` aceita `headless=` explícito: sem esse
+    parâmetro, o comportamento da VPS não teria como ser testado antes do deploy.
 
 ---
 

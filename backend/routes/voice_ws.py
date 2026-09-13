@@ -19,6 +19,10 @@ from google.genai import types
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
 from config import is_headless
+# Lista UNICA das ferramentas que precisam de tela — a mesma que o Jarvis usa
+# (ver `tools/function_defs.py`). Um lugar so, para as duas pontas do sistema
+# nunca divergirem sobre o que existe na VPS.
+from tools.function_defs import FERRAMENTAS_COM_GUI
 
 router = APIRouter()
 
@@ -821,16 +825,13 @@ def _get_charon_toolset() -> str:
 # `KeyError: 'DISPLAY'` (nao ImportError), e mss nao tem tela para capturar.
 # Removidas da lista enviada ao Gemini, para o Charon nao oferecer ao usuario
 # algo que so vai dar erro.
-_HEADLESS_EXCLUDED = {
-    "open_app",            # abre app na area de trabalho
-    "browser_control",     # controla o navegador na tela
-    "desktop_control",     # controla a area de trabalho
-    "computer_control",    # mouse/teclado
-    "computer_settings",   # ajustes do SO (volume, janelas)
-    "screen_process",      # captura de tela/camera
-    "game_updater",        # mexe em instalador grafico
-    "send_message",        # pyautogui para colar em apps de mensagem
-}
+#
+# FONTE UNICA: a lista de verdade vive em `tools/function_defs.py`
+# (`FERRAMENTAS_COM_GUI`), junto com `filtrar_tools_sem_gui()`. Antes havia uma
+# lista AQUI (do Charon) e NENHUMA no Jarvis — e as duas divergiriam com o tempo.
+# Agora as duas pontas leem a mesma fonte; este nome continua existindo porque
+# ha teste e log que o citam.
+_HEADLESS_EXCLUDED = FERRAMENTAS_COM_GUI
 
 
 def _filter_headless(tools: list) -> list:

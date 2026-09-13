@@ -407,8 +407,17 @@ escolha `+ Novo chat` ou clique numa sessao da arvore.
   (transcricao, rotulado "Sistema")
 - **`TranscriptEntry` duplicado** removido do `CharonPage` (TS2440)
 - **`STATUS.md` com byte invalido (0x97)** corrigido — o arquivo nem abria
-- **Testes:** `test_charon_barge_in.py` secao 8 (turno vazio) e
-  `test_charon_historico.py` secao 7 (as duas escolhas) → **20/20**
+- **Ferramentas por ambiente (Opcao A):** o Charon filtrava as ferramentas de
+  tela e o Jarvis **nao** — na VPS ele oferecia `open_app`/`desktop_control`, que
+  falham com `KeyError: 'DISPLAY'`. Fonte unica agora em
+  `tools/function_defs.py` (`FERRAMENTAS_COM_GUI` + `filtrar_tools_sem_gui`),
+  usada pelo Charon **e** pelo Jarvis (os DOIS caminhos: streaming e tarefas).
+  Jarvis: 58 tools no PC → 46 na VPS. Charon: 26 → 18.
+- **O `run_all.py` tinha lista fixa de testes:** um arquivo novo nunca rodava na
+  suite (aconteceu com `test_tools_headless.py`). Agora avisa quais ficaram de fora
+- **Testes:** `test_charon_barge_in.py` secao 8 (turno vazio),
+  `test_charon_historico.py` secoes 7 e 8 (escolha de contexto e o botao
+  ligar/desligar) e `test_tools_headless.py` (novo) → **21/21**
 
 ### ✅ Concluido na sessao 49 (para referencia)
 - **Provedores:** `openai`/`opencode`/`openclaude` ganharam campo de chave; 14
@@ -1240,3 +1249,25 @@ lsof -i :443
     abria em ferramenta de leitura — o handoff ficava cego mesmo estando no lugar
     certo. Ao escrever com PowerShell, escreva **UTF-8 sem BOM** e valide
     (`decode('utf-8')`) depois.
+64. **O mesmo codigo JA se comporta diferente por ambiente — nao crie um projeto
+    novo por isso.** `is_headless()` responde "tem tela?": no Windows e sempre
+    `False`; no Linux e `True` sem `DISPLAY`/`WAYLAND_DISPLAY` (VPS). Foi por nao
+    saber disso que o usuario criou o projeto gemeo `C:\DEEP-OS-LOCAL`. Antes de
+    duplicar projeto, procure por `is_headless`/`is_windows` no codigo.
+65. **Filtro de ferramenta em UM lugar so deixa o outro quebrado.** O Charon
+    filtrava as ferramentas de tela (`_HEADLESS_EXCLUDED`); o Jarvis NAO — e na
+    VPS ele oferecia `open_app`/`desktop_control`, que falham com
+    `KeyError: 'DISPLAY'` (pyautogui levanta KeyError, nao ImportError). Agora a
+    fonte unica e `FERRAMENTAS_COM_GUI` em `tools/function_defs.py` e as duas
+    pontas leem dela. Um lugar so.
+66. **Caminho que SO executa em producao e onde o bug se esconde.** No PC
+    `is_headless()` e sempre `False`, entao o filtro da VPS nunca rodava em teste.
+    `filtrar_tools_sem_gui(tools, headless=None)` aceita forcar o cenario: assim o
+    comportamento da VPS e testavel antes do deploy. Sempre que um caminho
+    depende do ambiente, de um jeito de FORCAR o ambiente no teste.
+67. **Teste fora do `run_all.py` nao existe.** A lista `TESTES` do runner e fixa:
+    criei `test_tools_headless.py`, rodei sozinho (passou) e a suite continuou
+    dizendo "20 testes", sem ele — um teste morto dando a impressao de proteger o
+    codigo. Agora `testes_esquecidos()` avisa quais `test_*.py` existem na pasta e
+    nao estao na lista. Regra que depende de alguem lembrar vai ser quebrada:
+    faca a FERRAMENTA avisar.
