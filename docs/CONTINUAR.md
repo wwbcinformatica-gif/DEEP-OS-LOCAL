@@ -1,9 +1,20 @@
 # DEEP-OS — Como continuar (handoff)
 
-**Atualizado:** 2026-09-12, sessão 50 (Charon: `<ctrl46>`, escolha de contexto)
+**Atualizado:** 2026-09-13, fim da sessão 50 (Charon/VPS, identidade, GPU, monitor)
 
 Este arquivo existe para que **outro modelo de IA continue o trabalho sem
 depender do histórico da conversa**. Leia isto primeiro, depois `memory.md`.
+
+> ### ⏭️ PARA AMANHÃ (o que fazer primeiro)
+>
+> 1. **Subir o deploy do VPS** — comandos logo abaixo, na seção 1.
+>    A VPS está em `73d139c`; o PC está em `f725228` (o gêmeo em `3d7a751`).
+>    Sem isso o usuário **não tem** nenhuma das correções desta sessão.
+> 2. **Atenção ao nginx:** ele mudou nesta rodada (ganhou o `/monitor`). Rode
+>    `nginx -t` ANTES do reload — config quebrada derruba o site.
+> 3. **O usuário precisa testar no navegador** (não deu para testar tudo hoje):
+>    monitor de CPU/RAM/VRAM, escolha de contexto, `<ctrl46>`, identidade
+>    separada e o novo layout do Jarvis. Ver seção 6.1.
 
 ---
 
@@ -11,23 +22,43 @@ depender do histórico da conversa**. Leia isto primeiro, depois `memory.md`.
 
 | | Commit | Onde |
 |---|--------|------|
-| **DEEP-OS** (principal) | `73d139c` | `C:\DEEP-OS`, branch `master` |
-| **DEEP-OS-LOCAL** (gêmeo) | `d7e5683` | `C:\DEEP-OS-LOCAL`, branch `main` |
-| **VPS** | `73d139c` | `/root/DEEP-OS` ✅ **sincronizado e verificado** |
+| **DEEP-OS** (principal) | `f725228` | `C:\DEEP-OS`, branch `master` |
+| **DEEP-OS-LOCAL** (gêmeo) | `3d7a751` | `C:\DEEP-OS-LOCAL`, branch `main` |
+| **VPS** | `73d139c` | `/root/DEEP-OS` ⚠️ **ATRASADA — falta o deploy** |
 
-Suíte: **21/21** nos dois. O verificador (`node tools/verificar-deploy.cjs`)
-confirma que o bundle publicado contém o código novo — as 26 marcas presentes,
-`auto-start` ausente, `/health` 200.
+Suíte: **25/25 nos dois**. `tsc` limpo, build OK.
 
-**Prova de que a Opção A (5.4) funciona em produção**, no log do deploy:
+### Como subir na VPS (console Hostinger — ele embaralha texto longo: va em blocos)
 
+**Bloco 1:**
 ```
-[Chat] Modo headless: 58 -> 46 tools (sem tela, removidas: explorer, open_app,
-close_app, media_play, send_message, browser_control, computer_settings,
-computer_control, desktop_control, game_updater, screen_process, upload_video)
+cd /root/DEEP-OS
 ```
+
+**Bloco 2** (leva 1 a 3 min; o script ja faz `git fetch` e o reset sozinho):
+```
+bash scripts/deploy-faf8f93.sh
+```
+
+No fim da saida, confira: `commit publicado : f725228` e
+`backend : active (deepos-backend.service)`.
+
+**Bloco 3 — o nginx mudou, valide antes de recarregar:**
+```
+nginx -t && systemctl reload nginx
+```
+
+**Depois, no PC**, para provar que o bundle publicado tem o codigo novo:
+```powershell
+cd C:\DEEP-OS
+node tools\verificar-deploy.cjs
+```
+Ele procura marcas do codigo novo dentro do JS publicado. Se as marcas das
+ultimas rodadas aparecerem como AUSENTES, o deploy nao subiu (ou o navegador
+esta com cache — `Ctrl+Shift+R`).
 
 Para conferir se a VPS está em dia: `git -C /root/DEEP-OS log --oneline -1`
+
 
 Para atualizar a VPS:
 
