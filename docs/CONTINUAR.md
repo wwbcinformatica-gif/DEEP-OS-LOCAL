@@ -22,11 +22,49 @@ depender do histórico da conversa**. Leia isto primeiro, depois `memory.md`.
 
 | | Commit | Onde |
 |---|--------|------|
-| **DEEP-OS** (principal) | `f725228` | `C:\DEEP-OS`, branch `master` |
-| **DEEP-OS-LOCAL** (gêmeo) | `3d7a751` | `C:\DEEP-OS-LOCAL`, branch `main` |
-| **VPS** | `73d139c` | `/root/DEEP-OS` ⚠️ **ATRASADA — falta o deploy** |
+| **DEEP-OS** (principal) | `f725228`+ | `C:\DEEP-OS`, branch `master` |
+| **DEEP-OS-LOCAL** (gêmeo) | `3d7a751`+ | `C:\DEEP-OS-LOCAL`, branch `main` |
+| **VPS** | `d08de05` | `/root/DEEP-OS` ✅ **deployado** |
 
 Suíte: **25/25 nos dois**. `tsc` limpo, build OK.
+
+> ### ⚠️ O NGINX NAO E INSTALADO PELO DEPLOY (leia antes de mexer em rota)
+>
+> - A config **REAL** da VPS e **`/etc/nginx/sites-enabled/deepos`**, escrita a
+>   mao. Ela tem TLS, `server_name` e `root /var/www/deep-os/frontend/dist-saas`.
+> - `nginx/vps-nginx.conf` (no projeto) e **so referencia** e ja divergiu (aponta
+>   para o Vite na 5176, tem `server_name` e certificado `-0001` diferentes).
+>   **NUNCA** substitua o arquivo real por ele.
+> - `scripts/deploy-faf8f93.sh` publica o frontend e faz `systemctl reload`, mas
+>   **nao instala config de nginx**.
+>
+> Consequencia real (aconteceu): o `/monitor` foi adicionado no arquivo do
+> projeto, o deploy subiu, e as barras de CPU/RAM/VRAM ficaram vazias — porque o
+> pedido caia no `location /` (SPA fallback) e voltava `index.html` com **HTTP
+> 200**. O `fetch` "dava certo", o `.json()` falhava e o sintoma nao apontava
+> para o nginx.
+>
+> **O deploy agora AVISA** (passo 7b): testa `/monitor`, `/llamacpp/models` e
+> `/ollama/status` e diz quais nao chegam ao backend.
+
+### Rotas que o nginx precisa encaminhar (confira depois de qualquer mudanca)
+
+| Rota | Para que serve | Status na VPS |
+|---|---|---|
+| `/monitor` | barras de CPU/RAM/VRAM | ✅ aplicada em 13/09 |
+| `/llamacpp/models` | lista de modelos GGUF | ❌ **faltando** (lista vazia pelo site) |
+| `/ollama/status` | lista de modelos do Ollama | ❌ **faltando** |
+
+Para adicionar (troque `ROTA` pelo caminho, **antes** do `location / {`):
+
+```
+printf '    location ROTA/ {\n        proxy_pass http://127.0.0.1:8001;\n        proxy_set_header Host $host;\n    }\n\n' > /tmp/r.conf
+```
+
+Depois insira `r` na linha anterior ao `location / {` e **sempre** valide:
+```
+nginx -t && systemctl reload nginx
+```
 
 ### Como subir na VPS (console Hostinger — ele embaralha texto longo: va em blocos)
 
@@ -40,22 +78,17 @@ cd /root/DEEP-OS
 bash scripts/deploy-faf8f93.sh
 ```
 
-No fim da saida, confira: `commit publicado : f725228` e
-`backend : active (deepos-backend.service)`.
-
-**Bloco 3 — o nginx mudou, valide antes de recarregar:**
-```
-nginx -t && systemctl reload nginx
-```
+No fim da saida, confira `commit publicado : <sha>` e
+`backend : active (deepos-backend.service)`, e olhe o passo **7b** (rotas do
+nginx).
 
 **Depois, no PC**, para provar que o bundle publicado tem o codigo novo:
 ```powershell
 cd C:\DEEP-OS
 node tools\verificar-deploy.cjs
 ```
-Ele procura marcas do codigo novo dentro do JS publicado. Se as marcas das
-ultimas rodadas aparecerem como AUSENTES, o deploy nao subiu (ou o navegador
-esta com cache — `Ctrl+Shift+R`).
+Ele procura marcas do codigo novo dentro do JS publicado **e testa a rota
+`/monitor` de verdade** (exige JSON, nao so HTTP 200 — HTML com 200 e reprovado).
 
 Para conferir se a VPS está em dia: `git -C /root/DEEP-OS log --oneline -1`
 

@@ -47,8 +47,20 @@ export default function MiniMonitors() {
     transition: 'width 0.5s ease',
   });
 
+  // A GPU so existe se o backend enxergou uma placa NVIDIA (`nvidia-smi`).
+  // Quando nao ha, `total_gb` vem 0 — e "---" fazia parecer DEFEITO, quando na
+  // verdade e a informacao correta: aquela maquina nao tem placa de video.
+  //
+  // Isso acontece na VPS (4 GB de RAM, sem GPU): quem abre o site pelo
+  // deep-os.tech esta medindo o SERVIDOR, nao o proprio PC. O texto deixa isso
+  // explicito em vez de sugerir que o medidor quebrou.
+  const temGpu = (d?.vram?.total_gb ?? 0) > 0;
+
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '0 4px' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '0 4px' }}
+         title={temGpu
+           ? 'Uso da maquina que esta rodando este sistema.'
+           : 'Sem placa NVIDIA nesta maquina. Se voce abriu pelo site (deep-os.tech), este medidor mostra o SERVIDOR; a sua placa aparece quando o sistema roda local (start-saas.bat).'}>
       {/* CPU */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 600 }}>CPU</span>
@@ -75,11 +87,11 @@ export default function MiniMonitors() {
       {/* GPU */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
         <span style={{ fontSize: 9, color: 'var(--muted)', fontWeight: 600 }}>GPU</span>
-        <span style={{ fontSize: 10, fontWeight: 700, color: vramPct > 85 ? '#f44747' : '#b388ff' }}>
-          {d?.vram?.used_gb != null && (d.vram.total_gb ?? 0) > 0 ? `${d.vram.used_gb.toFixed(1)}G` : '---'}
+        <span style={{ fontSize: 10, fontWeight: 700, color: !temGpu ? 'var(--muted)' : vramPct > 85 ? '#f44747' : '#b388ff' }}>
+          {temGpu ? `${d!.vram.used_gb.toFixed(1)}G` : 'sem'}
         </span>
         <span style={{ fontSize: 8, color: 'var(--muted)' }}>
-          {d?.vram?.percent != null && (d.vram.total_gb ?? 0) > 0 ? `${d.vram.percent.toFixed(0)}%` : ''}
+          {temGpu && d?.vram?.percent != null ? `${d.vram.percent.toFixed(0)}%` : (temGpu ? '' : 'GPU')}
         </span>
         <div style={barStyle(vramPct, '#b388ff')}>
           <div style={fillStyle(vramPct, vramPct > 85 ? '#f44747' : '#b388ff')} />

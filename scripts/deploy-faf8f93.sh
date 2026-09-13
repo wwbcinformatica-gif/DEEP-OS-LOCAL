@@ -193,6 +193,52 @@ else
 fi
 systemctl reload nginx 2>/dev/null && ok "nginx recarregado" || warn "falha ao recarregar o nginx"
 
+# ── 7b. As ROTAS do nginx: o deploy NAO instala config ──────────────────────
+#
+# BUG QUE ISTO PEGA (aconteceu de verdade)
+#
+# Eu adicionei `location /monitor` em `nginx/vps-nginx.conf` (o arquivo DO
+# PROJETO) e subi o deploy. O site ficou com as barras de CPU/RAM/VRAM vazias,
+# porque:
+#
+#   1. a config REAL da VPS e `/etc/nginx/sites-enabled/deepos`, escrita a mao,
+#      e NAO e o arquivo do projeto (esse e so referencia, e ja divergiu);
+#   2. este script publica o frontend e recarrega o nginx, mas NUNCA instala
+#      config de nginx.
+#
+# Resultado: o codigo novo estava publicado e a rota nao existia. O pedido caia
+# no `location /` (SPA fallback) e voltava `index.html` com **HTTP 200** — o
+# frontend le como sucesso, o `.json()` falha e o sintoma nao aponta para o
+# nginx. Mesma armadilha da secao 9 do docs/CONTINUAR.md.
+#
+# Aqui a gente TESTA cada rota que o frontend chama com caminho relativo. Nao da
+# para instalar a config automaticamente (o arquivo real tem TLS, server_name e
+# outras coisas que nao estao no repo), mas da para AVISAR na hora do deploy em
+# vez de o usuario descobrir pela tela quebrada.
+say "7b/8  Conferindo se o nginx encaminha as rotas do frontend"
+ROTAS_FALTANDO=0
+for ROTA in /monitor /llamacpp/models /ollama/status; do
+  RESP="$(curl -s --max-time 8 "http://127.0.0.1${ROTA}" 2>/dev/null | head -c 1)"
+  if [ "$RESP" = "{" ] || [ "$RESP" = "[" ]; then
+    ok "$ROTA -> JSON (nginx encaminha ao backend)"
+  elif [ "$RESP" = "<" ]; then
+    warn "$ROTA -> HTML (nginx NAO encaminha: caiu no location /)"
+    echo "        Para corrigir, adicione ao /etc/nginx/sites-enabled/deepos,"
+    echo "        ANTES do 'location / {':"
+    echo "            location ${ROTA%%/*}/ { proxy_pass http://127.0.0.1:8001;"
+    echo "                proxy_set_header Host \$host; }"
+    ROTAS_FALTANDO=$((ROTAS_FALTANDO + 1))
+  else
+    warn "$ROTA -> sem resposta (backend fora do ar? rota inexistente?)"
+  fi
+done
+if [ "$ROTAS_FALTANDO" -gt 0 ]; then
+  echo ""
+  echo "  ATENCAO: $ROTAS_FALTANDO rota(s) nao chegam ao backend."
+  echo "           O site funciona, mas o recurso correspondente fica vazio"
+  echo "           SEM erro visivel no navegador. Valide com: nginx -t"
+fi
+
 # ── 8. Verificacao ──────────────────────────────────────────────────────────
 say "8/8  Verificacao"
 code() { curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$1"; }
