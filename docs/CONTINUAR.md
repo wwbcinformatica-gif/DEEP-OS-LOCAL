@@ -11,9 +11,21 @@ depender do histórico da conversa**. Leia isto primeiro, depois `memory.md`.
 
 | | Commit | Onde |
 |---|--------|------|
-| **DEEP-OS** (principal) | `aff1b8b` | `C:\DEEP-OS`, branch `master` |
-| **DEEP-OS-LOCAL** (gêmeo) | `6fea43b` | `C:\DEEP-OS-LOCAL`, branch `main` |
-| **VPS** | `aff1b8b` | `/root/DEEP-OS` ✅ sincronizado |
+| **DEEP-OS** (principal) | `73d139c` | `C:\DEEP-OS`, branch `master` |
+| **DEEP-OS-LOCAL** (gêmeo) | `d7e5683` | `C:\DEEP-OS-LOCAL`, branch `main` |
+| **VPS** | `73d139c` | `/root/DEEP-OS` ✅ **sincronizado e verificado** |
+
+Suíte: **21/21** nos dois. O verificador (`node tools/verificar-deploy.cjs`)
+confirma que o bundle publicado contém o código novo — as 26 marcas presentes,
+`auto-start` ausente, `/health` 200.
+
+**Prova de que a Opção A (5.4) funciona em produção**, no log do deploy:
+
+```
+[Chat] Modo headless: 58 -> 46 tools (sem tela, removidas: explorer, open_app,
+close_app, media_play, send_message, browser_control, computer_settings,
+computer_control, desktop_control, game_updater, screen_process, upload_video)
+```
 
 Para conferir se a VPS está em dia: `git -C /root/DEEP-OS log --oneline -1`
 
